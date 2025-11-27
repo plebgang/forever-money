@@ -2,7 +2,7 @@
 Data models for SN98 ForeverMoney Validator-Miner communication.
 """
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 
 
@@ -53,12 +53,12 @@ class ValidatorRequest(BaseModel):
         None, description="Database access credentials"
     )
 
-    @validator('inventory', always=True)
-    def validate_mode_inventory(cls, v, values):
+    @model_validator(mode='after')
+    def validate_mode_inventory(self) -> 'ValidatorRequest':
         """Ensure inventory is provided when mode is INVENTORY."""
-        if values.get('mode') == Mode.INVENTORY and v is None:
+        if self.mode == Mode.INVENTORY and self.inventory is None:
             raise ValueError("inventory must be provided when mode is INVENTORY")
-        return v
+        return self
 
 
 class Position(BaseModel):
@@ -71,12 +71,12 @@ class Position(BaseModel):
         None, ge=0.0, le=1.0, description="Confidence score (0-1)"
     )
 
-    @validator('tickUpper')
-    def validate_tick_range(cls, v, values):
+    @model_validator(mode='after')
+    def validate_tick_range(self) -> 'Position':
         """Ensure tickUpper > tickLower."""
-        if 'tickLower' in values and v <= values['tickLower']:
+        if self.tickUpper <= self.tickLower:
             raise ValueError("tickUpper must be greater than tickLower")
-        return v
+        return self
 
 
 class RebalanceRule(BaseModel):

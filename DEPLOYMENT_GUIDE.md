@@ -477,7 +477,7 @@ DB_CONNECTION_STRING
 # Pool Configuration (BID/WETH pool on Aerodrome Base)
 PAIR_ADDRESS=0x1024c20c048ea6087293f46d4a1c042cb6705924
 CHAIN_ID=8453
-START_BLOCK=35325252
+START_BLOCK=35330091
 TARGET_BLOCK=38634763
 ```
 
@@ -507,7 +507,7 @@ python -m validator.main \
   --netuid 98 \
   --pair_address 0x1024c20c048ea6087293f46d4a1c042cb6705924 \
   --target_block 38634763 \
-  --start_block 35325252 \
+  --start_block 35330091 \
   --dry-run
 ```
 
@@ -523,7 +523,7 @@ python -m validator.main \
   --netuid 98 \
   --pair_address 0x1024c20c048ea6087293f46d4a1c042cb6705924 \
   --target_block 38634763 \
-  --start_block 35325252 \
+  --start_block 35330091 \
   --test-miner http://localhost:8091 \
   --dry-run
 ```

@@ -1,14 +1,54 @@
 """
 Database utilities for querying pool events from Postgres.
 Adapted for the actual substreams schema with separate tables for swaps, mints, burns, etc.
+
+Includes retry logic for transient failures.
 """
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import List, Dict, Any, Optional
 import logging
 from contextlib import contextmanager
+import time
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 1.0  # Base delay in seconds (exponential backoff)
+RETRYABLE_ERRORS = (
+    psycopg2.OperationalError,
+    psycopg2.InterfaceError,
+    ConnectionError,
+    TimeoutError,
+)
+
+
+def retry_on_db_error(func):
+    """
+    Decorator that retries database operations on transient failures.
+    Uses exponential backoff.
+    """
+    def wrapper(*args, **kwargs):
+        last_exception = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except RETRYABLE_ERRORS as e:
+                last_exception = e
+                delay = RETRY_DELAY_BASE * (2 ** attempt)
+                logger.warning(
+                    f"Database operation failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+            except Exception as e:
+                # Non-retryable error, raise immediately
+                raise
+        # All retries exhausted
+        logger.error(f"Database operation failed after {MAX_RETRIES} attempts")
+        raise last_exception
+    return wrapper
 
 
 class PoolDataDB:
@@ -22,6 +62,10 @@ class PoolDataDB:
     - mints: liquidity additions with tick ranges
     - burns: liquidity removals
     - collects: fee collections
+
+    Features:
+    - Automatic retry on transient connection failures
+    - Connection pooling friendly (creates new connections per operation)
     """
 
     def __init__(
@@ -48,21 +92,27 @@ class PoolDataDB:
 
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections."""
+        """Context manager for database connections with automatic cleanup."""
         conn = None
         try:
             if self.connection_string:
-                conn = psycopg2.connect(self.connection_string)
+                conn = psycopg2.connect(self.connection_string, connect_timeout=10)
             else:
-                conn = psycopg2.connect(**self.connection_params)
+                conn = psycopg2.connect(**self.connection_params, connect_timeout=10)
             yield conn
         except psycopg2.Error as e:
-            logger.error(f"Database connection error: {e}")
+            # Sanitize error message to avoid logging credentials
+            error_msg = str(e).split('@')[0] if '@' in str(e) else str(e)
+            logger.error(f"Database connection error: {error_msg}")
             raise
         finally:
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
+    @retry_on_db_error
     def get_swap_events(
         self,
         pair_address: str,
@@ -115,6 +165,7 @@ class PoolDataDB:
                 cursor.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
 
+    @retry_on_db_error
     def get_price_at_block(
         self,
         pair_address: str,
@@ -146,6 +197,7 @@ class PoolDataDB:
                     return price
                 return None
 
+    @retry_on_db_error
     def get_mint_events(
         self,
         pair_address: str,
@@ -186,6 +238,7 @@ class PoolDataDB:
                 cursor.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
 
+    @retry_on_db_error
     def get_burn_events(
         self,
         pair_address: str,
@@ -225,6 +278,7 @@ class PoolDataDB:
                 cursor.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
 
+    @retry_on_db_error
     def get_collect_events(
         self,
         pair_address: str,
@@ -264,6 +318,7 @@ class PoolDataDB:
                 cursor.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
 
+    @retry_on_db_error
     def get_fee_growth(
         self,
         pair_address: str,
@@ -297,6 +352,7 @@ class PoolDataDB:
                     'fee1': float(result['total_fee1'] or 0)
                 }
 
+    @retry_on_db_error
     def get_tick_at_block(
         self,
         pair_address: str,
@@ -324,18 +380,19 @@ class PoolDataDB:
                     return int(result['tick'])
                 return None
 
+    @retry_on_db_error
     def get_miner_vault_fees(
         self,
         vault_addresses: List[str],
         start_block: int,
         end_block: int
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Dict[str, float]]:
         """
         Calculate total fees collected by miner vaults in a period.
         Used for the 30% LP Alignment score.
 
         Returns:
-            Dictionary mapping vault_address to total fees collected
+            Dictionary mapping vault_address to {'fee0': float, 'fee1': float}
         """
         # Clean addresses
         clean_addresses = [addr.lower().replace('0x', '') for addr in vault_addresses]
@@ -364,3 +421,19 @@ class PoolDataDB:
                     }
 
                 return vault_fees
+
+    def test_connection(self) -> bool:
+        """
+        Test if the database connection is working.
+
+        Returns:
+            True if connection successful, False otherwise
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    return True
+        except Exception as e:
+            logger.error(f"Database connection test failed: {e}")
+            return False

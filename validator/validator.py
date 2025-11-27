@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterable
 import requests
 
 import bittensor as bt
@@ -20,7 +20,7 @@ from validator.models import (
     MinerScore
 )
 from validator.database import PoolDataDB
-from validator.backtester import Backtester
+from validator.backtester import Backtester, DEFAULT_FEE_RATE
 from validator.constraints import ConstraintValidator
 from validator.scorer import Scorer
 
@@ -54,15 +54,23 @@ class SN98Validator:
         self.db = db
         self.config = config
 
-        # Initialize components
-        self.backtester = Backtester(db)
+        # Get fee rate from config or use default
+        fee_rate = config.get('fee_rate', DEFAULT_FEE_RATE)
+
+        # Initialize components with fee rate
+        self.backtester = Backtester(db, fee_rate=fee_rate)
         self.scorer = Scorer(
             performance_weight=config.get('performance_weight', 0.7),
             lp_alignment_weight=config.get('lp_alignment_weight', 0.3),
             top_n_strategies=config.get('top_n_strategies', 3)
         )
 
+        # Vault registry: mapping miner_uid -> vault_address
+        # In production, this would be loaded from chain or config
+        self.vault_registry: Dict[int, str] = config.get('vault_registry', {})
+
         logger.info(f"Validator initialized with hotkey: {wallet.hotkey.ss58_address}")
+        logger.info(f"Fee rate: {fee_rate:.4f} ({fee_rate*100:.2f}%)")
 
     def query_test_miner(
         self,
@@ -278,14 +286,19 @@ class SN98Validator:
         # Initialize constraint validator
         validator = ConstraintValidator(request.metadata.constraints)
 
-        # Get initial amounts
+        # Get initial amounts from inventory or use sensible defaults
         if request.inventory:
             initial_amount0 = int(request.inventory.amount0)
             initial_amount1 = int(request.inventory.amount1)
         else:
-            logger.warning("No inventory provided, using default amounts")
-            initial_amount0 = 1000000000000000000  # 1 token
-            initial_amount1 = 1000000000  # 1000 USDC (6 decimals)
+            # Default: 1 ETH (18 decimals) and 2500 USDC (6 decimals)
+            # These represent a ~$5000 position at ~$2500/ETH
+            logger.warning("No inventory provided, using default amounts (1 ETH + 2500 USDC)")
+            initial_amount0 = 1_000_000_000_000_000_000  # 1 ETH in wei
+            initial_amount1 = 2_500_000_000  # 2500 USDC (6 decimals)
+
+        # Get fee rate for backtesting
+        fee_rate = self.config.get('fee_rate', DEFAULT_FEE_RATE)
 
         # Backtest each strategy
         for uid, response in miner_responses.items():
@@ -309,7 +322,8 @@ class SN98Validator:
                     initial_amount0=initial_amount0,
                     initial_amount1=initial_amount1,
                     start_block=start_block,
-                    end_block=end_block
+                    end_block=end_block,
+                    fee_rate=fee_rate
                 )
 
                 # Validate performance metrics
@@ -335,13 +349,15 @@ class SN98Validator:
                 constraint_violations[uid].append(f"Backtesting error: {str(e)}")
 
         # Get LP alignment data (vault fees)
-        vault_fees = self._get_vault_fees(miner_responses.keys(), start_block, end_block)
+        vault_fees = self._get_vault_fees(
+            miner_uids=list(miner_responses.keys()),
+            pair_address=request.pairAddress,
+            start_block=start_block,
+            end_block=end_block
+        )
 
-        # Get miner hotkeys
-        miner_hotkeys = {
-            uid: self.metagraph.hotkeys[uid]
-            for uid in miner_responses.keys()
-        }
+        # Get miner hotkeys (safely handle test miners and missing UIDs)
+        miner_hotkeys = self._get_miner_hotkeys(miner_responses.keys())
 
         # Calculate final scores
         scores = self.scorer.calculate_final_scores(
@@ -353,31 +369,101 @@ class SN98Validator:
 
         return scores
 
+    def _get_miner_hotkeys(self, miner_uids: Iterable[int]) -> Dict[int, str]:
+        """
+        Safely get hotkeys for miner UIDs, handling test miners and missing UIDs.
+
+        Args:
+            miner_uids: Iterable of miner UIDs
+
+        Returns:
+            Dictionary mapping miner_uid to hotkey string
+        """
+        hotkeys = {}
+        for uid in miner_uids:
+            if uid < 0:
+                # Test miner
+                hotkeys[uid] = f"test_miner_{uid}"
+            elif uid < len(self.metagraph.hotkeys):
+                hotkeys[uid] = self.metagraph.hotkeys[uid]
+            else:
+                # Unknown UID
+                hotkeys[uid] = f"unknown_{uid}"
+        return hotkeys
+
     def _get_vault_fees(
         self,
         miner_uids: List[int],
+        pair_address: str,
         start_block: int,
         end_block: int
     ) -> Dict[int, float]:
         """
         Get LP fees collected by miner vaults.
 
+        This method attempts to:
+        1. Look up vault addresses from the vault registry
+        2. Query actual fees from the database
+        3. Fall back to equal distribution if no vault data available
+
         Args:
             miner_uids: List of miner UIDs
+            pair_address: Pool address
             start_block: Starting block
             end_block: Ending block
 
         Returns:
-            Dictionary mapping miner_uid to total fees (in USD equivalent)
+            Dictionary mapping miner_uid to total fees
         """
-        # TODO: Query vault registry to get vault addresses for each miner
-        # For MVP, return mock data
-        vault_fees = {}
+        vault_fees: Dict[int, float] = {}
 
+        # Check if we have vault addresses for any miners
+        vault_addresses = []
+        uid_to_vault = {}
         for uid in miner_uids:
-            # Placeholder: assume each miner has collected some fees
-            vault_fees[uid] = 1000.0 + (uid * 100.0)  # Mock data
+            vault_addr = self.vault_registry.get(uid)
+            if vault_addr:
+                vault_addresses.append(vault_addr)
+                uid_to_vault[vault_addr.lower().replace('0x', '')] = uid
 
+        # If we have vault addresses, query actual fees
+        if vault_addresses:
+            try:
+                fees_by_vault = self.db.get_miner_vault_fees(
+                    vault_addresses=vault_addresses,
+                    start_block=start_block,
+                    end_block=end_block
+                )
+
+                # Get price at end block for converting fees to common denominator
+                end_price = self.db.get_price_at_block(pair_address, end_block) or 1.0
+
+                # Map fees back to UIDs
+                for vault_addr, fees in fees_by_vault.items():
+                    clean_addr = vault_addr.lower().replace('0x', '')
+                    if clean_addr in uid_to_vault:
+                        uid = uid_to_vault[clean_addr]
+                        # Combine fee0 and fee1 into single value (in token1 terms)
+                        total_fee = fees.get('fee0', 0) * end_price + fees.get('fee1', 0)
+                        vault_fees[uid] = total_fee
+
+                # For miners without vault data, give them 0 fees
+                for uid in miner_uids:
+                    if uid not in vault_fees:
+                        vault_fees[uid] = 0.0
+
+                logger.info(f"Queried vault fees for {len(vault_fees)} miners from database")
+                return vault_fees
+
+            except Exception as e:
+                logger.warning(f"Error querying vault fees from DB: {e}, falling back to equal distribution")
+
+        # Fallback: Equal LP alignment for all miners
+        # This gives everyone equal share of the 30% LP component
+        for uid in miner_uids:
+            vault_fees[uid] = 1.0
+
+        logger.info(f"Using equal LP alignment scores for {len(miner_uids)} miners (no vault registry)")
         return vault_fees
 
     def publish_scores(self, scores: List[MinerScore]) -> None:
@@ -399,7 +485,7 @@ class SN98Validator:
         weights = [0.0] * len(self.metagraph.uids)
 
         for score in scores:
-            if score.miner_uid < len(weights):
+            if 0 <= score.miner_uid < len(weights):
                 weights[score.miner_uid] = score.final_score
 
         # Normalize weights
@@ -459,7 +545,7 @@ class SN98Validator:
         target_block: int,
         inventory: Inventory,
         start_block: int
-    ) -> None:
+    ) -> Optional[MinerScore]:
         """
         Execute a complete validation round.
 
@@ -468,6 +554,9 @@ class SN98Validator:
             target_block: Target block for predictions
             inventory: Available inventory
             start_block: Starting block for backtest
+
+        Returns:
+            MinerScore of the winning strategy, or None if no valid strategies
         """
         logger.info(f"Starting validation round for block {target_block}")
 
@@ -493,7 +582,7 @@ class SN98Validator:
 
         if not miner_responses:
             logger.warning("No valid miner responses received")
-            return
+            return None
 
         # 3. Evaluate strategies
         scores = self.evaluate_strategies(
@@ -503,8 +592,17 @@ class SN98Validator:
             end_block=target_block
         )
 
+        if not scores:
+            logger.warning("No strategies could be scored")
+            return None
+
         # 4. Get winning strategy
         winning_score = self.scorer.get_winning_strategy(scores)
+
+        if winning_score.miner_uid not in miner_responses:
+            logger.error(f"Winning miner UID {winning_score.miner_uid} not found in responses")
+            return None
+
         winning_response = miner_responses[winning_score.miner_uid]
 
         # 5. Publish scores and winning strategy
@@ -512,3 +610,4 @@ class SN98Validator:
         self.publish_winning_strategy(winning_score, winning_response)
 
         logger.info("Validation round completed")
+        return winning_score

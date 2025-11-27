@@ -3,10 +3,17 @@ Sample Miner implementation for SN98 ForeverMoney.
 
 This is a reference implementation using a simple rule-based strategy.
 Miners can replace this with ML models, optimization algorithms, or hybrid approaches.
+
+Production Deployment:
+    Use Gunicorn instead of Flask's development server:
+    $ gunicorn -w 4 -b 0.0.0.0:8000 miner.miner:app
+
+    Or with the provided script:
+    $ ./run_miner.sh
 """
 import os
 import logging
-from typing import Dict, Any, List
+from typing import Optional
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
@@ -14,10 +21,9 @@ from validator.models import (
     ValidatorRequest,
     MinerResponse,
     Strategy,
-    Position,
-    RebalanceRule,
     MinerMetadata
 )
+from validator.database import PoolDataDB
 from miner.strategy import SimpleStrategyGenerator
 
 # Load environment
@@ -38,14 +44,29 @@ MINER_VERSION = os.getenv('MINER_VERSION', '1.0.0-mvp')
 MODEL_INFO = os.getenv('MODEL_INFO', 'simple-rule-based')
 MINER_PORT = int(os.getenv('MINER_PORT', 8000))
 
-# Initialize strategy generator
-strategy_generator = SimpleStrategyGenerator()
+# Initialize database connection from environment (if available)
+db_connection: Optional[PoolDataDB] = None
+db_connection_string = os.getenv('DB_CONNECTION_STRING')
+if db_connection_string:
+    try:
+        db_connection = PoolDataDB(connection_string=db_connection_string)
+        logger.info("Database connection initialized from environment")
+    except Exception as e:
+        logger.warning(f"Could not initialize database: {e}")
+
+# Initialize strategy generator with database connection
+strategy_generator = SimpleStrategyGenerator(db=db_connection)
 
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
-    return jsonify({'status': 'healthy', 'version': MINER_VERSION}), 200
+    return jsonify({
+        'status': 'healthy',
+        'version': MINER_VERSION,
+        'model': MODEL_INFO,
+        'db_connected': db_connection is not None
+    }), 200
 
 
 @app.route('/predict_strategy', methods=['POST'])
@@ -73,6 +94,7 @@ def predict_strategy():
             f"Received strategy request for pair {validator_request.pairAddress}, "
             f"block {validator_request.target_block}"
         )
+        logger.info(f"Using database: {db_connection is not None}")
 
         # Generate strategy
         strategy = strategy_generator.generate_strategy(validator_request)
@@ -97,14 +119,33 @@ def predict_strategy():
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 
+def create_app():
+    """
+    Application factory for Gunicorn.
+
+    Usage with Gunicorn:
+        gunicorn -w 4 -b 0.0.0.0:8000 'miner.miner:create_app()'
+
+    Or simply:
+        gunicorn -w 4 -b 0.0.0.0:8000 miner.miner:app
+    """
+    return app
+
+
 def main():
-    """Run the miner server."""
+    """
+    Run the miner server (development mode).
+
+    For production, use Gunicorn:
+        gunicorn -w 4 -b 0.0.0.0:8000 miner.miner:app
+    """
     logger.info(f"Starting SN98 Miner v{MINER_VERSION}")
     logger.info(f"Model: {MODEL_INFO}")
     logger.info(f"Listening on port {MINER_PORT}")
+    logger.warning("Running in development mode. For production, use Gunicorn:")
+    logger.warning(f"  gunicorn -w 4 -b 0.0.0.0:{MINER_PORT} miner.miner:app")
 
-    # Run Flask app
-    # In production, use a proper WSGI server like Gunicorn
+    # Run Flask app (development only)
     app.run(
         host='0.0.0.0',
         port=MINER_PORT,
