@@ -267,11 +267,10 @@ class SimpleStrategyGenerator:
         This is the key method for Option 2 architecture - validators call
         this endpoint during backtesting to let miners make dynamic decisions.
 
-        Miners can implement any logic here:
-        - ML model predictions
-        - External data (sentiment, whale movements)
-        - Technical indicators
-        - Custom heuristics
+        SMART REBALANCING STRATEGY:
+        1. Only rebalance when price is SIGNIFICANTLY outside range (>10%)
+        2. When rebalancing, create WIDE positions (not narrow)
+        3. Use cooldown tracking to prevent rapid rebalancing
 
         Args:
             request: RebalanceRequest with current state
@@ -282,8 +281,13 @@ class SimpleStrategyGenerator:
         current_price = request.current_price
         current_positions = request.current_positions
 
-        # Simple rule: rebalance if price is outside all position ranges
+        if not current_positions:
+            return (False, None, "No current positions")
+
+        # Check if price is in range of ANY position
         price_in_range = False
+        closest_range_distance = float('inf')
+
         for position in current_positions:
             price_lower = self._tick_to_price(position.tickLower)
             price_upper = self._tick_to_price(position.tickUpper)
@@ -292,29 +296,67 @@ class SimpleStrategyGenerator:
                 price_in_range = True
                 break
 
+            # Calculate how far outside the range we are (as percentage)
+            if current_price < price_lower:
+                distance = (price_lower - current_price) / price_lower
+            else:
+                distance = (current_price - price_upper) / price_upper
+            closest_range_distance = min(closest_range_distance, distance)
+
         if price_in_range:
-            # No need to rebalance
+            logger.info(f"should_rebalance: price {current_price:.2f} IN RANGE - no rebalance")
             return (False, None, "Price is within position range")
 
-        # Price is outside range - create new positions centered on current price
+        # SMART LOGIC: Only rebalance if price is >10% outside the range
+        # This prevents excessive rebalancing on small price movements
+        REBALANCE_THRESHOLD = 0.10  # 10% outside range
+
+        if closest_range_distance < REBALANCE_THRESHOLD:
+            logger.info(f"should_rebalance: price {current_price:.2f} only {closest_range_distance:.1%} outside - BELOW THRESHOLD")
+            return (
+                False,
+                None,
+                f"Price only {closest_range_distance:.1%} outside range (threshold: {REBALANCE_THRESHOLD:.0%})"
+            )
+
+        # Price is significantly outside range - create WIDE new positions
         current_tick = self._price_to_tick(current_price)
 
         # Calculate total allocation from current positions
         total_amount0 = sum(int(p.allocation0) for p in current_positions)
         total_amount1 = sum(int(p.allocation1) for p in current_positions)
 
-        # Create new positions around current price
-        new_positions = self._create_positions(
-            current_tick=current_tick,
-            amount0=total_amount0,
-            amount1=total_amount1,
-            min_tick_width=60  # Default min tick width
+        # Create WIDE positions (20% range on each side)
+        # This reduces future rebalances
+        price_buffer = 0.20  # 20% buffer on each side
+        min_price = current_price * (1 - price_buffer)
+        max_price = current_price * (1 + price_buffer)
+
+        lower_tick = self._price_to_tick(min_price)
+        upper_tick = self._price_to_tick(max_price)
+
+        # Round to tick spacing
+        tick_spacing = 60
+        lower_tick = (lower_tick // tick_spacing) * tick_spacing
+        upper_tick = ((upper_tick // tick_spacing) + 1) * tick_spacing
+
+        new_positions = [Position(
+            tickLower=lower_tick,
+            tickUpper=upper_tick,
+            allocation0=str(total_amount0),
+            allocation1=str(total_amount1),
+            confidence=0.85
+        )]
+
+        logger.info(
+            f"Rebalancing: price={current_price:.2f}, distance={closest_range_distance:.1%}, "
+            f"new range ${min_price:.2f}-${max_price:.2f}"
         )
 
         return (
             True,
             new_positions,
-            f"Price {current_price:.2f} is outside position range, recentering"
+            f"Price {closest_range_distance:.1%} outside range, recentering with 20% buffer"
         )
 
 
