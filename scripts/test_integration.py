@@ -153,7 +153,7 @@ def verify_results():
     print(f"\n  Positions: {len(positions)}")
     for i, pos in enumerate(positions):
         print(f"    Position {i+1}:")
-        print(f"      Tick Range: {pos.get('tickLower')} - {pos.get('tickUpper')}")
+        print(f"      Tick Range: {pos.get('tick_lower')} - {pos.get('tick_upper')}")
         print(f"      Allocation0: {pos.get('allocation0')}")
         print(f"      Allocation1: {pos.get('allocation1')}")
         print(f"      Confidence: {pos.get('confidence')}")

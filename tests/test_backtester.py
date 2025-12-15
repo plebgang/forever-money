@@ -4,7 +4,7 @@ Tests for the Backtester class.
 import pytest
 from unittest.mock import Mock, MagicMock
 from validator.backtester import Backtester, UniswapV3Math
-from validator.models import Strategy, Position, RebalanceRule
+from protocol.models import Strategy, Position, RebalanceRule
 from validator.database import PoolDataDB
 
 
@@ -79,15 +79,15 @@ def test_backtester_strategy_simulation(backtester, mock_db):
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-8000,
+                tick_lower=-10000,
+                tick_upper=-8000,
                 allocation0="500000000000000000",
                 allocation1="1250000000",
                 confidence=0.85
             ),
             Position(
-                tickLower=-8000,
-                tickUpper=-6000,
+                tick_lower=-8000,
+                tick_upper=-6000,
                 allocation0="500000000000000000",
                 allocation1="1250000000",
                 confidence=0.75
@@ -123,8 +123,8 @@ def test_position_simulation_in_range(backtester, mock_db):
     mock_db.get_price_at_block.return_value = 2500.0
 
     position = Position(
-        tickLower=-10000,
-        tickUpper=-8000,
+        tick_lower=-10000,
+        tick_upper=-8000,
         allocation0="1000000000000000000",
         allocation1="2500000000",
         confidence=0.9
@@ -148,8 +148,8 @@ def test_position_simulation_out_of_range(backtester, mock_db):
     mock_db.get_price_at_block.side_effect = [2500.0, 3000.0]  # Large price movement
 
     position = Position(
-        tickLower=-10000,
-        tickUpper=-9500,  # Narrow range
+        tick_lower=-10000,
+        tick_upper=-9500,  # Narrow range
         allocation0="1000000000000000000",
         allocation1="2500000000",
         confidence=0.9

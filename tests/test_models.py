@@ -5,15 +5,16 @@ import pytest
 from pydantic import ValidationError
 from validator.models import (
     ValidatorRequest,
-    MinerResponse,
+    Constraints,
+    ValidatorMetadata
+)
+from miner.models import MinerResponse, MinerMetadata
+from protocol.models import (
     Strategy,
     Position,
     RebalanceRule,
-    MinerMetadata,
     Inventory,
-    Mode,
-    Constraints,
-    ValidatorMetadata
+    Mode
 )
 
 
@@ -31,24 +32,24 @@ def test_inventory_model():
 def test_position_model_valid():
     """Test Position model with valid data."""
     position = Position(
-        tickLower=-10000,
-        tickUpper=-9900,
+        tick_lower=-10000,
+        tick_upper=-9900,
         allocation0="1000000000000000000",
         allocation1="2500000000",
         confidence=0.9
     )
 
-    assert position.tickLower == -10000
-    assert position.tickUpper == -9900
+    assert position.tick_lower == -10000
+    assert position.tick_upper == -9900
     assert position.confidence == 0.9
 
 
 def test_position_invalid_tick_range():
-    """Test that tickUpper must be greater than tickLower."""
+    """Test that tick_upper must be greater than tick_lower."""
     with pytest.raises(ValidationError):
         Position(
-            tickLower=-9900,
-            tickUpper=-10000,  # Invalid: upper < lower
+            tick_lower=-9900,
+            tick_upper=-10000,  # Invalid: upper < lower
             allocation0="1000000000000000000",
             allocation1="2500000000"
         )
@@ -58,8 +59,8 @@ def test_position_confidence_bounds():
     """Test confidence must be between 0 and 1."""
     # Valid confidence
     Position(
-        tickLower=-10000,
-        tickUpper=-9900,
+        tick_lower=-10000,
+        tick_upper=-9900,
         allocation0="1000000000000000000",
         allocation1="2500000000",
         confidence=0.5
@@ -68,8 +69,8 @@ def test_position_confidence_bounds():
     # Invalid: > 1
     with pytest.raises(ValidationError):
         Position(
-            tickLower=-10000,
-            tickUpper=-9900,
+            tick_lower=-10000,
+            tick_upper=-9900,
             allocation0="1000000000000000000",
             allocation1="2500000000",
             confidence=1.5
@@ -78,8 +79,8 @@ def test_position_confidence_bounds():
     # Invalid: < 0
     with pytest.raises(ValidationError):
         Position(
-            tickLower=-10000,
-            tickUpper=-9900,
+            tick_lower=-10000,
+            tick_upper=-9900,
             allocation0="1000000000000000000",
             allocation1="2500000000",
             confidence=-0.1
@@ -91,8 +92,8 @@ def test_strategy_model():
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-9900,
+                tick_lower=-10000,
+                tick_upper=-9900,
                 allocation0="500000000000000000",
                 allocation1="1250000000",
                 confidence=0.9
@@ -114,8 +115,8 @@ def test_strategy_without_rebalance_rule():
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-9900,
+                tick_lower=-10000,
+                tick_upper=-9900,
                 allocation0="500000000000000000",
                 allocation1="1250000000"
             )
@@ -132,8 +133,8 @@ def test_miner_response_model():
         strategy=Strategy(
             positions=[
                 Position(
-                    tickLower=-10000,
-                    tickUpper=-9900,
+                    tick_lower=-10000,
+                    tick_upper=-9900,
                     allocation0="500000000000000000",
                     allocation1="1250000000",
                     confidence=0.9
@@ -164,8 +165,8 @@ def test_validator_request_inventory_mode():
     )
 
     request = ValidatorRequest(
-        pairAddress="0x1234567890123456789012345678901234567890",
-        chainId=8453,
+        pair_address="0x1234567890123456789012345678901234567890",
+        chain_id=8453,
         target_block=12345678,
         mode=Mode.INVENTORY,
         inventory=Inventory(
@@ -196,8 +197,8 @@ def test_validator_request_inventory_required():
     # Should raise error: inventory required for INVENTORY mode
     with pytest.raises(ValidationError):
         ValidatorRequest(
-            pairAddress="0x1234567890123456789012345678901234567890",
-            chainId=8453,
+            pair_address="0x1234567890123456789012345678901234567890",
+            chain_id=8453,
             target_block=12345678,
             mode=Mode.INVENTORY,
             inventory=None,  # Missing inventory
@@ -221,14 +222,14 @@ def test_validator_request_position_mode():
     )
 
     request = ValidatorRequest(
-        pairAddress="0x1234567890123456789012345678901234567890",
-        chainId=8453,
+        pair_address="0x1234567890123456789012345678901234567890",
+        chain_id=8453,
         target_block=12345678,
         mode=Mode.POSITION,
         current_positions=[
             CurrentPosition(
-                tickLower=-10000,
-                tickUpper=-9900,
+                tick_lower=-10000,
+                tick_upper=-9900,
                 liquidity="1000000000000000000"
             )
         ],
@@ -275,8 +276,8 @@ def test_mode_enum():
 def test_model_serialization():
     """Test that models can be serialized to JSON."""
     position = Position(
-        tickLower=-10000,
-        tickUpper=-9900,
+        tick_lower=-10000,
+        tick_upper=-9900,
         allocation0="1000000000000000000",
         allocation1="2500000000",
         confidence=0.9
@@ -285,8 +286,8 @@ def test_model_serialization():
     # Serialize using pydantic
     position_dict = position.model_dump()
 
-    assert position_dict['tickLower'] == -10000
-    assert position_dict['tickUpper'] == -9900
+    assert position_dict['tick_lower'] == -10000
+    assert position_dict['tick_upper'] == -9900
     assert position_dict['allocation0'] == "1000000000000000000"
     assert position_dict['confidence'] == 0.9
 
@@ -294,8 +295,8 @@ def test_model_serialization():
 def test_model_deserialization():
     """Test that models can be deserialized from JSON."""
     position_dict = {
-        'tickLower': -10000,
-        'tickUpper': -9900,
+        'tick_lower': -10000,
+        'tick_upper': -9900,
         'allocation0': '1000000000000000000',
         'allocation1': '2500000000',
         'confidence': 0.9
@@ -303,8 +304,8 @@ def test_model_deserialization():
 
     position = Position(**position_dict)
 
-    assert position.tickLower == -10000
-    assert position.tickUpper == -9900
+    assert position.tick_lower == -10000
+    assert position.tick_upper == -9900
     assert position.confidence == 0.9
 
 
@@ -314,15 +315,15 @@ def test_miner_response_full_format():
         "strategy": {
             "positions": [
                 {
-                    "tickLower": -9600,
-                    "tickUpper": -8400,
+                    "tick_lower": -9600,
+                    "tick_upper": -8400,
                     "allocation0": "500000000000000000",
                     "allocation1": "0",
                     "confidence": 0.82
                 },
                 {
-                    "tickLower": -8400,
-                    "tickUpper": -7200,
+                    "tick_lower": -8400,
+                    "tick_upper": -7200,
                     "allocation0": "0",
                     "allocation1": "1800000000",
                     "confidence": 0.78
@@ -350,8 +351,8 @@ def test_miner_response_full_format():
 def test_validator_request_full_format():
     """Test full ValidatorRequest matches spec format."""
     request_dict = {
-        "pairAddress": "0x0000000000000000000000000000000000000000",
-        "chainId": 8453,
+        "pair_address": "0x0000000000000000000000000000000000000000",
+        "chain_id": 8453,
         "target_block": 12345678,
         "mode": "inventory",
         "inventory": {
@@ -372,8 +373,8 @@ def test_validator_request_full_format():
     # Should parse without errors
     request = ValidatorRequest(**request_dict)
 
-    assert request.pairAddress == "0x0000000000000000000000000000000000000000"
-    assert request.chainId == 8453
+    assert request.pair_address == "0x0000000000000000000000000000000000000000"
+    assert request.chain_id == 8453
     assert request.mode == Mode.INVENTORY
     assert request.inventory.amount0 == "1000000000000000000"
     assert request.metadata.round_id == "2025-02-01-001"

@@ -10,7 +10,7 @@ Usage:
 import os
 import logging
 import argparse
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 import bittensor as bt
 from dotenv import load_dotenv
 
@@ -45,9 +45,9 @@ class SN98Miner:
 
     def __init__(
         self,
-        wallet: bt.wallet,
-        subtensor: bt.subtensor,
-        config: bt.config,
+        wallet: Any,  # bt.Wallet
+        subtensor: Any,  # bt.Subtensor
+        config: Any,  # bt.Config
     ):
         """
         Initialize miner.
@@ -79,7 +79,7 @@ class SN98Miner:
         self.strategy_generator = SimpleStrategyGenerator(db=self.db_connection)
 
         # Create and configure axon
-        self.axon = bt.axon(wallet=wallet, config=config)
+        self.axon = bt.Axon(wallet=wallet, config=config)
 
         # Attach forward functions to axon
         self.axon.attach(

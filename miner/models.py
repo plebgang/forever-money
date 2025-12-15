@@ -8,7 +8,16 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from protocol.models import Strategy, Position
-from protocol.synapses import MinerMetadata
+
+# MinerMetadata for backward compatibility
+try:
+    from protocol.synapses import MinerMetadata
+except ImportError:
+    # Fallback if bittensor not available (for testing)
+    class MinerMetadata(BaseModel):
+        """Metadata about the miner's model."""
+        version: str = Field(..., description="Miner version")
+        model_info: str = Field(..., description="Model description")
 
 
 class MinerResponse(BaseModel):
@@ -35,3 +44,10 @@ class RebalanceResponse(BaseModel):
         if self.rebalance and (self.new_positions is None or len(self.new_positions) == 0):
             raise ValueError("new_positions must be provided when rebalance is True")
         return self
+
+
+__all__ = [
+    "MinerMetadata",
+    "MinerResponse",
+    "RebalanceResponse",
+]

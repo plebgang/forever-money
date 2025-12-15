@@ -100,12 +100,13 @@ python -m validator.main \
 
 ```bash
 # Configure miner
-export MINER_PORT=8000
 export MINER_VERSION=1.0.0
 export MODEL_INFO="your-strategy-name"
 
-# Run miner server
-python -m miner.miner
+# Run miner (Bittensor axon)
+python -m miner.miner \
+  --wallet.name your_wallet \
+  --wallet.hotkey your_hotkey
 ```
 
 ### Implementing Your Strategy
@@ -114,7 +115,8 @@ Miners can customize strategy generation by extending the `SimpleStrategyGenerat
 
 ```python
 from miner.strategy import SimpleStrategyGenerator
-from validator.models import ValidatorRequest, Strategy
+from validator.models import ValidatorRequest
+from protocol.models import Strategy
 
 class MyCustomStrategy(SimpleStrategyGenerator):
     def generate_strategy(self, request: ValidatorRequest) -> Strategy:
@@ -136,70 +138,111 @@ strategy_generator = MyCustomStrategy()
 ### Strategy Requirements
 
 Your miner must:
-1. Host HTTP endpoint at `/predict_strategy`
-2. Accept `ValidatorRequest` JSON
-3. Return `MinerResponse` JSON with:
+1. Serve Bittensor axon with synapse handlers:
+   - `StrategyRequest` - Generate LP strategies
+   - `RebalanceQuery` - Dynamic rebalancing decisions
+2. Accept `StrategyRequest` synapse from validators
+3. Return strategy with:
    - List of positions (tick ranges, allocations)
    - Optional rebalance rules
    - Miner metadata
 4. Comply with all constraints from request
 
-## API Format
+### Communication Protocol
 
-### Validator Request to Miner
+Miners communicate with validators via **Bittensor's native dendrite/axon protocol**, not HTTP. The miner runs an axon that serves two Bittensor synapses:
 
-```json
-{
-  "pairAddress": "0x...",
-  "chainId": 8453,
-  "target_block": 12345678,
-  "mode": "inventory",
-  "inventory": {
-    "amount0": "1000000000000000000",
-    "amount1": "2500000000"
-  },
-  "metadata": {
-    "round_id": "2025-02-01-001",
-    "constraints": {
-      "max_il": 0.10,
-      "min_tick_width": 60,
-      "max_rebalances": 4
-    }
-  }
-}
+- `StrategyRequest` - Receives strategy requests and returns LP positions
+- `RebalanceQuery` - Receives rebalance queries during backtesting
+
+This eliminates the need for HTTP endpoints and integrates directly with the Bittensor network.
+
+## Communication Protocol
+
+Validators and miners communicate via **Bittensor synapses** (not HTTP). All data models are defined in the `protocol/` module.
+
+### StrategyRequest Synapse
+
+Validators send `StrategyRequest` synapses to miners:
+
+```python
+from protocol import StrategyRequest, Mode, Inventory
+
+request = StrategyRequest(
+    pair_address="0x...",
+    chain_id=8453,
+    target_block=12345678,
+    mode=Mode.INVENTORY,
+    inventory=Inventory(
+        amount0="1000000000000000000",
+        amount1="2500000000"
+    ),
+    metadata=ValidatorMetadata(
+        round_id="2025-02-01-001",
+        constraints=Constraints(
+            max_il=0.10,
+            min_tick_width=60,
+            max_rebalances=4
+        )
+    )
+)
 ```
 
-### Miner Response
+Miners respond by setting the `strategy` and `miner_metadata` fields on the synapse:
 
-```json
-{
-  "strategy": {
-    "positions": [
-      {
-        "tickLower": -9600,
-        "tickUpper": -8400,
-        "allocation0": "600000000000000000",
-        "allocation1": "0",
-        "confidence": 0.85
-      },
-      {
-        "tickLower": -8400,
-        "tickUpper": -7200,
-        "allocation0": "400000000000000000",
-        "allocation1": "2500000000",
-        "confidence": 0.72
-      }
+```python
+from protocol import Strategy, Position
+from miner.models import MinerMetadata
+
+# Miner sets these fields on the synapse
+synapse.strategy = Strategy(
+    positions=[
+        Position(
+            tick_lower=-9600,
+            tick_upper=-8400,
+            allocation0="600000000000000000",
+            allocation1="0",
+            confidence=0.85
+        ),
+        Position(
+            tick_lower=-8400,
+            tick_upper=-7200,
+            allocation0="400000000000000000",
+            allocation1="2500000000",
+            confidence=0.72
+        )
     ],
-    "rebalance_rule": {
-      "trigger": "price_outside_range",
-      "cooldown_blocks": 1800
-    }
-  },
-  "miner_metadata": {
-    "version": "1.0.0",
-    "model_info": "lstm-v3-optimized"
-  }
-}
+    rebalance_rule=RebalanceRule(
+        trigger="price_outside_range",
+        cooldown_blocks=1800
+    )
+)
+synapse.miner_metadata = MinerMetadata(
+    version="1.0.0",
+    model_info="lstm-v3-optimized"
+)
+```
+
+### RebalanceQuery Synapse
+
+During backtesting, validators may query miners for dynamic rebalance decisions:
+
+```python
+from protocol import RebalanceQuery
+
+query = RebalanceQuery(
+    block_number=12345700,
+    current_price=2550.0,
+    current_positions=[...],
+    pair_address="0x...",
+    chain_id=8453,
+    round_id="2025-02-01-001"
+)
+
+# Miner responds by setting:
+query.rebalance = True
+query.new_positions = [...]  # New positions if rebalancing
+query.reason = "Price moved outside range"
 ```
 
 ## Database Schema
@@ -228,17 +271,21 @@ Miners can query this database to:
 
 ```
 forever-money/
+├── protocol/            # Shared protocol models and synapses
+│   ├── models.py        # Shared data models (Strategy, Position, etc.)
+│   └── synapses.py      # Bittensor synapses (StrategyRequest, RebalanceQuery)
 ├── validator/           # Validator implementation
-│   ├── models.py        # Pydantic data models
+│   ├── models.py        # Validator-specific models
 │   ├── database.py      # Postgres interface
 │   ├── backtester.py    # Strategy backtesting
 │   ├── constraints.py   # Constraint validation
 │   ├── scorer.py        # Scoring system
-│   ├── validator.py     # Main validator logic
+│   ├── validator.py     # Main validator logic (uses Bittensor dendrite)
 │   └── main.py          # Entry point
 ├── miner/               # Sample miner implementation
+│   ├── models.py        # Miner-specific models
 │   ├── strategy.py      # Strategy generation
-│   └── miner.py         # HTTP server
+│   └── miner.py         # Bittensor axon server
 ├── tests/               # Test suite
 ├── spec.md              # Technical specification
 └── requirements.txt     # Python dependencies
@@ -247,12 +294,17 @@ forever-money/
 ### Testing
 
 ```bash
-# Run tests
+# Run tests (use Python 3.9+)
+~/.pyenv/versions/3.11.13/bin/python3 -m pytest tests/
+
+# Or if pytest is in your PATH
 pytest tests/
 
 # Run specific test
 pytest tests/test_backtester.py
 ```
+
+**Note**: Some tests that relied on the old HTTP communication protocol are skipped. The test suite has been updated to reflect the migration to Bittensor native communication.
 
 ## Strategy Development Tips
 
@@ -273,10 +325,10 @@ pytest tests/test_backtester.py
 
 ### Miner
 
-- Deploy behind reverse proxy (nginx/caddy)
-- Use WSGI server (gunicorn/uwsgi) instead of Flask dev server
-- Implement rate limiting and authentication
-- Monitor uptime and response times
+- Run as systemd service with automatic restart
+- Monitor axon uptime and Bittensor network connectivity
+- Ensure wallet security and backup hotkey
+- Monitor resource usage (CPU, memory, disk)
 
 ## Support
 

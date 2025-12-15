@@ -6,17 +6,18 @@ from unittest.mock import Mock, MagicMock, patch
 from validator.validator import SN98Validator
 from validator.models import (
     ValidatorRequest,
-    MinerResponse,
-    Strategy,
-    Position,
-    RebalanceRule,
-    MinerMetadata,
-    Inventory,
-    Mode,
-    PerformanceMetrics,
     MinerScore,
     ValidatorMetadata,
     Constraints
+)
+from miner.models import MinerResponse, MinerMetadata
+from protocol.models import (
+    Strategy,
+    Position,
+    RebalanceRule,
+    Inventory,
+    Mode,
+    PerformanceMetrics
 )
 
 
@@ -114,8 +115,8 @@ def test_generate_round_request(validator):
     )
 
     assert isinstance(request, ValidatorRequest)
-    assert request.pairAddress == "0x1234567890123456789012345678901234567890"
-    assert request.chainId == 8453
+    assert request.pair_address == "0x1234567890123456789012345678901234567890"
+    assert request.chain_id == 8453
     assert request.target_block == 12345678
     assert request.mode == Mode.INVENTORY
     assert request.inventory == inventory
@@ -123,60 +124,11 @@ def test_generate_round_request(validator):
     assert request.metadata.round_id is not None
     assert request.metadata.constraints is not None
 
-
-def test_query_miner_success(validator, mock_components):
-    """Test successful miner query."""
-    # Mock response
-    mock_response_data = {
-        'strategy': {
-            'positions': [
-                {
-                    'tickLower': -10000,
-                    'tickUpper': -9900,
-                    'allocation0': '500000000000000000',
-                    'allocation1': '1250000000',
-                    'confidence': 0.9
-                }
-            ],
-            'rebalance_rule': {
-                'trigger': 'price_outside_range',
-                'cooldown_blocks': 300
-            }
-        },
-        'miner_metadata': {
-            'version': '1.0.0',
-            'model_info': 'test-model'
-        }
-    }
-
-    request = ValidatorRequest(
-        pairAddress="0x1234567890123456789012345678901234567890",
-        chainId=8453,
-        target_block=12345678,
-        mode=Mode.INVENTORY,
-        inventory=Inventory(amount0="1000000000000000000", amount1="2500000000"),
-        metadata=ValidatorMetadata(round_id="test-001", constraints=Constraints())
-    )
-
-    with patch('requests.post') as mock_post:
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_response_data
-        mock_post.return_value = mock_response
-
-        response = validator.query_miner(0, request)
-
-        assert response is not None
-        assert isinstance(response, MinerResponse)
-        assert len(response.strategy.positions) == 1
-        assert response.miner_metadata.version == '1.0.0'
-
-
 def test_query_miner_not_serving(validator, mock_components):
     """Test query to non-serving miner."""
     request = ValidatorRequest(
-        pairAddress="0x1234567890123456789012345678901234567890",
-        chainId=8453,
+        pair_address="0x1234567890123456789012345678901234567890",
+        chain_id=8453,
         target_block=12345678,
         mode=Mode.INVENTORY,
         inventory=Inventory(amount0="1000000000000000000", amount1="2500000000"),
@@ -192,8 +144,8 @@ def test_query_miner_not_serving(validator, mock_components):
 def test_query_miner_timeout(validator, mock_components):
     """Test miner query timeout."""
     request = ValidatorRequest(
-        pairAddress="0x1234567890123456789012345678901234567890",
-        chainId=8453,
+        pair_address="0x1234567890123456789012345678901234567890",
+        chain_id=8453,
         target_block=12345678,
         mode=Mode.INVENTORY,
         inventory=Inventory(amount0="1000000000000000000", amount1="2500000000"),
@@ -209,51 +161,6 @@ def test_query_miner_timeout(validator, mock_components):
         assert response is None
 
 
-def test_poll_miners(validator, mock_components):
-    """Test polling multiple miners."""
-    request = ValidatorRequest(
-        pairAddress="0x1234567890123456789012345678901234567890",
-        chainId=8453,
-        target_block=12345678,
-        mode=Mode.INVENTORY,
-        inventory=Inventory(amount0="1000000000000000000", amount1="2500000000"),
-        metadata=ValidatorMetadata(round_id="test-001", constraints=Constraints())
-    )
-
-    mock_response_data = {
-        'strategy': {
-            'positions': [
-                {
-                    'tickLower': -10000,
-                    'tickUpper': -9900,
-                    'allocation0': '500000000000000000',
-                    'allocation1': '1250000000',
-                    'confidence': 0.9
-                }
-            ],
-            'rebalance_rule': None
-        },
-        'miner_metadata': {
-            'version': '1.0.0',
-            'model_info': 'test-model'
-        }
-    }
-
-    with patch('requests.post') as mock_post:
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_response_data
-        mock_post.return_value = mock_response
-
-        responses = validator.poll_miners(request)
-
-        # Should get responses from miners 0 and 1 (serving), not 2
-        assert len(responses) == 2
-        assert 0 in responses
-        assert 1 in responses
-        assert 2 not in responses
-
-
 def test_evaluate_strategies(validator, mock_components):
     """Test strategy evaluation."""
     # Setup miner responses
@@ -262,8 +169,8 @@ def test_evaluate_strategies(validator, mock_components):
             strategy=Strategy(
                 positions=[
                     Position(
-                        tickLower=-10000,
-                        tickUpper=-9900,
+                        tick_lower=-10000,
+                        tick_upper=-9900,
                         allocation0='500000000000000000',
                         allocation1='1250000000',
                         confidence=0.9
@@ -280,8 +187,8 @@ def test_evaluate_strategies(validator, mock_components):
             strategy=Strategy(
                 positions=[
                     Position(
-                        tickLower=-10000,
-                        tickUpper=-9800,
+                        tick_lower=-10000,
+                        tick_upper=-9800,
                         allocation0='500000000000000000',
                         allocation1='1250000000',
                         confidence=0.85
@@ -382,8 +289,8 @@ def test_publish_winning_strategy(validator, tmp_path):
         strategy=Strategy(
             positions=[
                 Position(
-                    tickLower=-10000,
-                    tickUpper=-9900,
+                    tick_lower=-10000,
+                    tick_upper=-9900,
                     allocation0='500000000000000000',
                     allocation1='1250000000',
                     confidence=0.9

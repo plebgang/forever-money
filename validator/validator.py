@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 import json
-from typing import List, Dict, Any, Optional, Iterable
+from typing import List, Dict, Any, Optional, Iterable, TYPE_CHECKING
 
 import bittensor as bt
 
@@ -28,6 +28,16 @@ from validator.backtester import Backtester, DEFAULT_FEE_RATE
 from validator.constraints import ConstraintValidator
 from validator.scorer import Scorer
 
+if TYPE_CHECKING:
+    # For type hints only
+    BtWallet = Any
+    BtSubtensor = Any
+    BtMetagraph = Any
+else:
+    BtWallet = Any
+    BtSubtensor = Any
+    BtMetagraph = Any
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,9 +56,9 @@ class SN98Validator:
 
     def __init__(
         self,
-        wallet: bt.wallet,
-        subtensor: bt.subtensor,
-        metagraph: bt.metagraph,
+        wallet: BtWallet,
+        subtensor: BtSubtensor,
+        metagraph: BtMetagraph,
         db: PoolDataDB,
         config: Dict[str, Any]
     ):
@@ -59,7 +69,7 @@ class SN98Validator:
         self.config = config
 
         # Initialize dendrite for communicating with miners
-        self.dendrite = bt.dendrite(wallet=wallet)
+        self.dendrite = bt.Dendrite(wallet=wallet)
 
         # Get fee rate from config or use default
         fee_rate = config.get('fee_rate', DEFAULT_FEE_RATE)

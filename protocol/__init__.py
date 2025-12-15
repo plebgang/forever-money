@@ -19,11 +19,21 @@ from protocol.models import (
     PerformanceMetrics,
 )
 
-# Export synapses
-from protocol.synapses import (
-    StrategyRequest,
-    RebalanceQuery,
-)
+# Export synapses (optional import - requires bittensor)
+try:
+    from protocol.synapses import (
+        StrategyRequest,
+        RebalanceQuery,
+        MinerMetadata,
+    )
+    _SYNAPSES_AVAILABLE = True
+except ImportError:
+    # Bittensor not available - synapses won't be available
+    # but core models will still work for testing
+    StrategyRequest = None
+    RebalanceQuery = None
+    MinerMetadata = None
+    _SYNAPSES_AVAILABLE = False
 
 __all__ = [
     # Shared Models
@@ -34,7 +44,8 @@ __all__ = [
     "RebalanceRule",
     "Strategy",
     "PerformanceMetrics",
-    # Synapses
+    # Synapses (may be None if bittensor not installed)
     "StrategyRequest",
     "RebalanceQuery",
+    "MinerMetadata",
 ]
