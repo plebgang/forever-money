@@ -3,7 +3,8 @@ Tests for constraint validation.
 """
 import pytest
 from validator.constraints import ConstraintValidator
-from validator.models import Strategy, Position, RebalanceRule, Constraints
+from protocol.models import Strategy, Position, RebalanceRule
+from validator.models import Constraints
 
 
 @pytest.fixture
@@ -27,8 +28,8 @@ def test_valid_strategy(validator):
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-9900,  # Width = 100, > 60
+                tick_lower=-10000,
+                tick_upper=-9900,  # Width = 100, > 60
                 allocation0="1000000000000000000",
                 allocation1="2500000000",
                 confidence=0.9
@@ -50,8 +51,8 @@ def test_tick_width_violation(validator):
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-9950,  # Width = 50, < 60
+                tick_lower=-10000,
+                tick_upper=-9950,  # Width = 50, < 60
                 allocation0="1000000000000000000",
                 allocation1="2500000000",
                 confidence=0.9
@@ -70,8 +71,8 @@ def test_zero_allocation_violation(validator):
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-9900,
+                tick_lower=-10000,
+                tick_upper=-9900,
                 allocation0="0",
                 allocation1="0",  # Both zero
                 confidence=0.9
@@ -90,8 +91,8 @@ def test_aggressive_cooldown_warning(validator):
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-9900,
+                tick_lower=-10000,
+                tick_upper=-9900,
                 allocation0="1000000000000000000",
                 allocation1="2500000000",
                 confidence=0.9
@@ -140,15 +141,15 @@ def test_multiple_positions(validator):
     strategy = Strategy(
         positions=[
             Position(
-                tickLower=-10000,
-                tickUpper=-9900,
+                tick_lower=-10000,
+                tick_upper=-9900,
                 allocation0="500000000000000000",
                 allocation1="1250000000",
                 confidence=0.9
             ),
             Position(
-                tickLower=-9900,
-                tickUpper=-9800,
+                tick_lower=-9900,
+                tick_upper=-9800,
                 allocation0="500000000000000000",
                 allocation1="1250000000",
                 confidence=0.85

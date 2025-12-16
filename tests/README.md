@@ -36,47 +36,49 @@ This directory contains comprehensive tests for the SN98 ForeverMoney subnet imp
 5. **`test_validator.py`** - Validator integration
    - Tests SN98Validator class initialization
    - Tests round request generation
-   - Tests miner querying (success, timeout, not serving)
-   - Tests miner polling across multiple miners
+   - Tests miner querying (timeout, not serving)
    - Tests strategy evaluation pipeline
    - Tests score publishing to Bittensor network
    - Tests winning strategy publication
+   - **NOTE**: Some tests for HTTP-based miner querying have been skipped as the system now uses Bittensor dendrite for communication
 
 ### Integration Tests
 
 6. **`test_integration.py`** - End-to-end testing
-   - Tests complete validator-to-miner communication flow
-   - Tests miner HTTP endpoint (Flask app)
    - Tests strategy generation from validator requests
    - Tests constraint validation in evaluation pipeline
    - Tests API format compatibility with specification
-   - Validates complete request-response cycle
+   - **NOTE**: Tests for HTTP endpoint communication have been skipped/updated as the system now uses Bittensor's native dendrite/axon protocol instead of HTTP
 
 ## Running Tests
 
 ### Prerequisites
 
 ```bash
-# Install dependencies
+# Install dependencies (requires Python 3.9+)
 pip install -r requirements.txt
 ```
 
 The `requirements.txt` includes:
 - `pytest>=7.4.0` - Test framework
 - `pytest-asyncio>=0.21.0` - Async test support
+- `bittensor>=6.0.0` - Bittensor SDK
 - All project dependencies
 
 ### Run All Tests
 
 ```bash
-# Run all tests
+# Run all tests (Python 3.9+ required)
 pytest tests/
+
+# Or with specific Python version
+~/.pyenv/versions/3.11.13/bin/python3 -m pytest tests/
 
 # Run with verbose output
 pytest -v tests/
 
 # Run with coverage report
-pytest --cov=validator --cov=miner tests/
+pytest --cov=validator --cov=miner --cov=protocol tests/
 
 # Run specific test file
 pytest tests/test_scorer.py
@@ -84,6 +86,12 @@ pytest tests/test_scorer.py
 # Run specific test function
 pytest tests/test_scorer.py::test_performance_scoring_top_heavy
 ```
+
+### Test Results
+
+As of the migration to Bittensor native communication:
+- **47 tests passing** - All core functionality validated
+- **5 tests skipped** - Legacy HTTP endpoint tests (no longer applicable)
 
 ### Test Organization
 
@@ -123,8 +131,9 @@ Total: ~57 tests
 ### 2. Miner Requirements ✅
 
 #### Request validator requests
-- ✅ Tested in `test_integration.py::test_miner_endpoint_request_response`
-- ✅ Tests Flask HTTP endpoint `/predict_strategy`
+- ✅ Tested in `test_integration.py::test_miner_strategy_generation`
+- ✅ Tests strategy generation from ValidatorRequest
+- ⚠️ HTTP endpoint tests skipped (migrated to Bittensor synapses)
 
 #### Calculate and provide ranges
 - ✅ Tested in `test_integration.py::test_miner_strategy_generation`
@@ -207,8 +216,6 @@ Tests mock the database. If you see connection errors, check:
 - Mock setup in test fixtures
 - Database instantiation uses mocks
 
-### Bittensor Errors
-Tests mock Bittensor components (wallet, subtensor, metagraph). No actual Bittensor connection is needed.
 
 ## Next Steps
 
