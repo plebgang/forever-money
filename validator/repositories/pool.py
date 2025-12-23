@@ -15,7 +15,7 @@ from tortoise import Tortoise
 from tortoise.exceptions import DBConnectionError, OperationalError
 from tortoise.functions import Sum
 
-from validator.pool_events_models import SwapEvent, MintEvent, BurnEvent, CollectEvent
+from validator.models.pool_events import SwapEvent, MintEvent, BurnEvent, CollectEvent
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +42,10 @@ class DataSource(ABC):
         pass
 
     @abstractmethod
-    async def get_price_at_block(
+    async def get_sqrt_price_at_block(
         self, pair_address: str, block_number: int
-    ) -> Optional[float]:
-        """Get the price (token1/token0) at a specific block."""
+    ) -> Optional[int]:
+        """Get the sqrt price at a specific block."""
         pass
 
     @abstractmethod
@@ -86,7 +86,9 @@ class DataSource(ABC):
         pass
 
     @abstractmethod
-    async def get_tick_at_block(self, pair_address: str, block_number: int) -> Optional[int]:
+    async def get_tick_at_block(
+        self, pair_address: str, block_number: int
+    ) -> Optional[int]:
         """Get the current tick at a specific block."""
         pass
 
@@ -226,9 +228,9 @@ class PoolDataDB(DataSource):
         ]
 
     @retry_on_db_error
-    async def get_price_at_block(
+    async def get_sqrt_price_at_block(
         self, pair_address: str, block_number: int
-    ) -> Optional[float]:
+    ) -> Optional[int]:
         """
         Get the price (token1/token0) at a specific block.
         Uses the most recent swap before or at the block.
@@ -236,7 +238,9 @@ class PoolDataDB(DataSource):
         clean_address = pair_address.lower().replace("0x", "")
 
         result = await (
-            SwapEvent.filter(evt_address=clean_address, evt_block_number__lte=block_number)
+            SwapEvent.filter(
+                evt_address=clean_address, evt_block_number__lte=block_number
+            )
             .order_by("-evt_block_number")
             .first()
         )
@@ -244,8 +248,7 @@ class PoolDataDB(DataSource):
         if result and result.sqrt_price_x96:
             # Convert sqrtPriceX96 to actual price
             sqrt_price = int(result.sqrt_price_x96)
-            price = (sqrt_price / (2**96)) ** 2
-            return price
+            return sqrt_price
         return None
 
     @retry_on_db_error
@@ -418,14 +421,18 @@ class PoolDataDB(DataSource):
         return {"fee0": 0.0, "fee1": 0.0}
 
     @retry_on_db_error
-    async def get_tick_at_block(self, pair_address: str, block_number: int) -> Optional[int]:
+    async def get_tick_at_block(
+        self, pair_address: str, block_number: int
+    ) -> Optional[int]:
         """
         Get the current tick at a specific block.
         """
         clean_address = pair_address.lower().replace("0x", "")
 
         result = await (
-            SwapEvent.filter(evt_address=clean_address, evt_block_number__lte=block_number)
+            SwapEvent.filter(
+                evt_address=clean_address, evt_block_number__lte=block_number
+            )
             .order_by("-evt_block_number")
             .first()
         )

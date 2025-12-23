@@ -19,7 +19,9 @@ class SwapEvent(Model):
     """
 
     id = fields.IntField(pk=True)
-    evt_address = fields.CharField(max_length=42, index=True)  # Pool address (without 0x)
+    evt_address = fields.CharField(
+        max_length=42, index=True
+    )  # Pool address (without 0x)
     evt_block_number = fields.BigIntField(index=True)
     evt_tx_hash = fields.CharField(max_length=66)
     evt_block_time = fields.DatetimeField(null=True)
@@ -35,9 +37,7 @@ class SwapEvent(Model):
 
     class Meta:
         table = "swaps"
-        indexes = (
-            ("evt_address", "evt_block_number"),
-        )
+        indexes = (("evt_address", "evt_block_number"),)
 
     def __str__(self):
         return f"Swap(pool={self.evt_address}, block={self.evt_block_number})"
@@ -51,7 +51,9 @@ class MintEvent(Model):
     """
 
     id = fields.IntField(pk=True)
-    evt_address = fields.CharField(max_length=42, index=True)  # Pool address (without 0x)
+    evt_address = fields.CharField(
+        max_length=42, index=True
+    )  # Pool address (without 0x)
     evt_block_number = fields.BigIntField(index=True)
     evt_tx_hash = fields.CharField(max_length=66)
     evt_block_time = fields.DatetimeField(null=True)
@@ -67,9 +69,7 @@ class MintEvent(Model):
 
     class Meta:
         table = "mints"
-        indexes = (
-            ("evt_address", "evt_block_number"),
-        )
+        indexes = (("evt_address", "evt_block_number"),)
 
     def __str__(self):
         return f"Mint(pool={self.evt_address}, block={self.evt_block_number})"
@@ -83,7 +83,9 @@ class BurnEvent(Model):
     """
 
     id = fields.IntField(pk=True)
-    evt_address = fields.CharField(max_length=42, index=True)  # Pool address (without 0x)
+    evt_address = fields.CharField(
+        max_length=42, index=True
+    )  # Pool address (without 0x)
     evt_block_number = fields.BigIntField(index=True)
     evt_tx_hash = fields.CharField(max_length=66)
     evt_block_time = fields.DatetimeField(null=True)
@@ -98,9 +100,7 @@ class BurnEvent(Model):
 
     class Meta:
         table = "burns"
-        indexes = (
-            ("evt_address", "evt_block_number"),
-        )
+        indexes = (("evt_address", "evt_block_number"),)
 
     def __str__(self):
         return f"Burn(pool={self.evt_address}, block={self.evt_block_number})"
@@ -114,7 +114,9 @@ class CollectEvent(Model):
     """
 
     id = fields.IntField(pk=True)
-    evt_address = fields.CharField(max_length=42, index=True)  # Pool address (without 0x)
+    evt_address = fields.CharField(
+        max_length=42, index=True
+    )  # Pool address (without 0x)
     evt_block_number = fields.BigIntField(index=True)
     evt_tx_hash = fields.CharField(max_length=66)
     evt_block_time = fields.DatetimeField(null=True)
@@ -122,8 +124,12 @@ class CollectEvent(Model):
     # Collect details
     tick_lower = fields.IntField()
     tick_upper = fields.IntField()
-    amount0 = fields.DecimalField(max_digits=78, decimal_places=0)  # Fee amount in token0
-    amount1 = fields.DecimalField(max_digits=78, decimal_places=0)  # Fee amount in token1
+    amount0 = fields.DecimalField(
+        max_digits=78, decimal_places=0
+    )  # Fee amount in token0
+    amount1 = fields.DecimalField(
+        max_digits=78, decimal_places=0
+    )  # Fee amount in token1
     owner = fields.CharField(max_length=42)
     recipient = fields.CharField(max_length=42)
 

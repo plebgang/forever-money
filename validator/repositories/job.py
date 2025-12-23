@@ -6,10 +6,10 @@ All methods are async.
 """
 import logging
 from typing import List, Optional, Dict
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
 
-from validator.models_orm import (
+from validator.models.job import (
     Job,
     Round,
     Prediction,
@@ -23,7 +23,7 @@ from validator.models_orm import (
 logger = logging.getLogger(__name__)
 
 
-class AsyncJobManager:
+class JobRepository:
     """Async job manager using Tortoise ORM."""
 
     async def get_active_jobs(self) -> List[Job]:
@@ -45,18 +45,17 @@ class AsyncJobManager:
         start_block: int,
     ) -> Round:
         """
-        Create a new round for a job.
+        Create a new round for a job or return existing one.
 
         Args:
             job: Job to create round for
             round_type: RoundType.EVALUATION or RoundType.LIVE
             round_number: Sequential round number
             start_block: Start block for the round
-            round_deadline: Round deadline.
         Returns:
             Created Round object
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         round_deadline = start_time + timedelta(minutes=15)  # 15 minutes to
         round_id = f"{job.job_id}_{round_type.value}_{round_number}_{int(start_time.timestamp())}"
 
@@ -149,7 +148,7 @@ class AsyncJobManager:
         evaluation_score: Optional[float] = None,
         live_score: Optional[float] = None,
         round_type: RoundType = RoundType.EVALUATION,
-    ):
+    ) -> MinerScore:
         """
         Update miner's reputation score for a job using EMA.
 
@@ -206,6 +205,7 @@ class AsyncJobManager:
         logger.debug(
             f"Updated score for miner {miner_uid} on job {job_id}: {float(score.combined_score):.4f}"
         )
+        return score
 
     async def update_miner_participation(
         self, job_id: str, miner_uid: int, participated: bool
@@ -287,7 +287,7 @@ class AsyncJobManager:
         """
         round_obj = await Round.get(round_id=round_id)
         round_obj.status = RoundStatus.COMPLETED
-        round_obj.end_time = datetime.now()
+        round_obj.end_time = datetime.now(timezone.utc)
         round_obj.winner_uid = winner_uid
         round_obj.performance_data = performance_data
         await round_obj.save()
@@ -343,7 +343,7 @@ class AsyncJobManager:
         job = await Job.get(job_id=job_id)
         round_obj = await Round.get(round_id=round_id)
 
-        execution_id = f"{round_id}_{miner_uid}_{int(datetime.now().timestamp())}"
+        execution_id = f"{round_id}_{miner_uid}_{int(datetime.now(timezone.utc).timestamp())}"
 
         execution = await LiveExecution.create(
             execution_id=execution_id,

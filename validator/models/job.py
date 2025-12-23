@@ -3,12 +3,19 @@ Tortoise ORM Models for SN98 Jobs System.
 
 All database operations are async using Tortoise ORM.
 """
-from typing import Optional, Dict, Any
-from datetime import datetime
 from enum import Enum
+from typing import Optional
 
 from tortoise import Tortoise, fields
 from tortoise.models import Model
+
+from validator.utils.env import (
+    JOBS_POSTGRES_HOST,
+    JOBS_POSTGRES_PORT,
+    JOBS_POSTGRES_DB,
+    JOBS_POSTGRES_USER,
+    JOBS_POSTGRES_PASSWORD,
+)
 
 
 class RoundType(str, Enum):
@@ -40,6 +47,7 @@ class Job(Model):
     pair_address = fields.CharField(max_length=42)
     fee_rate = fields.FloatField(default=0.03)
     target = fields.CharField(max_length=50, default="PoL")
+    target_ratio = fields.FloatField(default=0.5)
     chain_id = fields.IntField(default=8453)
     is_active = fields.BooleanField(default=True, index=True)
     round_duration_seconds = fields.IntField(default=900)
@@ -122,7 +130,7 @@ class Prediction(Model):
         indexes = (("job_id", "miner_uid"),)
 
     def __str__(self):
-        return f"Prediction({self.miner_uid}, round={self.round_id})"
+        return f"Prediction({self.miner_uid}, round={self.round})"
 
 
 class MinerScore(Model):
@@ -173,7 +181,7 @@ class MinerScore(Model):
         )
 
     def __str__(self):
-        return f"MinerScore(miner={self.miner_uid}, job={self.job_id}, score={self.combined_score})"
+        return f"MinerScore(miner={self.miner_uid}, job={self.job}, score={self.combined_score})"
 
 
 class MinerParticipation(Model):
@@ -200,7 +208,7 @@ class MinerParticipation(Model):
         indexes = (("job_id", "miner_uid", "participation_date"),)
 
     def __str__(self):
-        return f"Participation(miner={self.miner_uid}, job={self.job_id}, date={self.participation_date})"
+        return f"Participation(miner={self.miner_uid}, job={self.job}, date={self.participation_date})"
 
 
 class LiveExecution(Model):
@@ -249,17 +257,17 @@ TORTOISE_ORM = {
         "default": {
             "engine": "tortoise.backends.asyncpg",
             "credentials": {
-                "host": "localhost",
-                "port": 5432,
-                "user": "sn98_user",
-                "password": "",
-                "database": "sn98_jobs",
+                "host": JOBS_POSTGRES_HOST,
+                "port": JOBS_POSTGRES_PORT,
+                "user": JOBS_POSTGRES_USER,
+                "password": JOBS_POSTGRES_PASSWORD,
+                "database": JOBS_POSTGRES_DB,
             },
         }
     },
     "apps": {
         "models": {
-            "models": ["validator.models_orm", "aerich.models"],
+            "models": ["validator.models.job", "aerich.models"],
             "default_connection": "default",
         }
     },
@@ -274,7 +282,7 @@ async def init_db(db_url: Optional[str] = None):
         db_url: Optional database URL (postgresql+asyncpg://user:pass@host:port/db)
     """
     if db_url:
-        await Tortoise.init(db_url=db_url, modules={"models": ["validator.models_orm"]})
+        await Tortoise.init(db_url=db_url, modules={"models": ["validator.models.job"]})
     else:
         await Tortoise.init(config=TORTOISE_ORM)
 
