@@ -8,27 +8,20 @@ Uses rebalance-only protocol:
 Usage:
     python -m miner.miner --wallet.name <wallet_name> --wallet.hotkey <hotkey_name>
 """
-import os
 import logging
 import argparse
 import time
 from typing import Optional, Tuple, Any
 import bittensor as bt
-from dotenv import load_dotenv
 
 from protocol.synapses import RebalanceQuery
-
-# Load environment
-load_dotenv()
+from validator.utils.env import MINER_VERSION, NETUID, SUBTENSOR_NETWORK
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-# Configuration
-MINER_VERSION = os.getenv("MINER_VERSION", "0.1.0")
 
 
 class SN98Miner:
@@ -197,20 +190,44 @@ def get_config():
     """
     parser = argparse.ArgumentParser(description="SN98 ForeverMoney Miner")
 
-    # Only essential arguments (wallet credentials)
+    # Wallet arguments
     parser.add_argument("--wallet.name", type=str, required=True, help="Wallet name")
     parser.add_argument(
         "--wallet.hotkey", type=str, required=True, help="Wallet hotkey"
     )
 
+    # Network arguments
+    parser.add_argument(
+        "--subtensor.network",
+        type=str,
+        default=None,
+        help=f"Subtensor network endpoint (e.g., ws://127.0.0.1:9944, wss://entrypoint-finney.opentensor.ai:443, or finney/test/local). Default: {SUBTENSOR_NETWORK}",
+    )
+    parser.add_argument(
+        "--netuid",
+        type=int,
+        default=None,
+        help=f"Network UID. Default: {NETUID}",
+    )
+
     # Parse config with bt.config to get bittensor defaults
     config = bt.config(parser)
 
-    # Override with environment variables if set
-    if os.getenv("SUBTENSOR_NETWORK"):
-        config.subtensor.network = os.getenv("SUBTENSOR_NETWORK")
-    if os.getenv("NETUID"):
-        config.netuid = int(os.getenv("NETUID"))
+    # Override with CLI args or environment variables
+    # Priority: CLI args > env vars > defaults
+    if hasattr(config, 'subtensor') and hasattr(config, 'subtensor.network'):
+        # CLI arg provided
+        pass
+    elif SUBTENSOR_NETWORK:
+        # Use env var
+        config.subtensor.network = SUBTENSOR_NETWORK
+
+    if hasattr(config, 'netuid') and config.netuid is not None:
+        # CLI arg provided
+        pass
+    elif NETUID:
+        # Use env var
+        config.netuid = NETUID
 
     return config
 
@@ -234,7 +251,7 @@ def main():
     logger.info(f"Wallet: {wallet}")
 
     # Create subtensor
-    subtensor = bt.subtensor(config=config)
+    subtensor = bt.Subtensor(config=config)
     logger.info(f"Subtensor: {subtensor}")
 
     # Create miner

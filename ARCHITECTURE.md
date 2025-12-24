@@ -7,21 +7,21 @@ SN98 is a decentralized Automated Liquidity Manager (ALM) built on Bittensor. Th
 ## High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────┐
 │                         Bittensor Network                        │
-│  ┌──────────────┐              ┌──────────────────────────────┐ │
-│  │   Miners     │◄────────────►│       Validator              │ │
-│  │  (N nodes)   │              │    (Jobs Orchestrator)       │ │
-│  └──────────────┘              └──────────────────────────────┘ │
+│  ┌──────────────┐              ┌──────────────────────────────┐  │
+│  │   Miners     │◄────────────►│       Validator              │  │
+│  │  (N nodes)   │              │    (Jobs Orchestrator)       │  │
+│  └──────────────┘              └──────────────────────────────┘  │
 │       │                                    │                     │
 │       │ RebalanceQuery                     │ Job Management      │
 │       │ (Dynamic decisions)                │                     │
 │       └────────────────────────────────────┘                     │
-└─────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────┘
                                               │
                     ┌─────────────────────────┼──────────────────────┐
                     │                         │                      │
-          ┌─────────▼──────────┐    ┌────────▼────────┐   ┌────────▼────────┐
+          ┌─────────▼──────────┐    ┌─────────▼───────┐   ┌──────────▼──────┐
           │   Jobs Database    │    │  Pool Events DB │   │  Blockchain RPC │
           │  (Tortoise ORM)    │    │  (Read-only)    │   │    (Base L2)    │
           │                    │    │                 │   │                 │
@@ -57,22 +57,22 @@ Job {
 The validator uses **asyncio** to run multiple jobs simultaneously:
 
 ```python
-┌─────────────────────────────────────────────────────────┐
-│              Validator Main Loop (Async)                │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  Job 1 (ETH/USDC)    Job 2 (WBTC/USDC)   Job 3 (AERO)  │
-│       │                    │                   │        │
-│       ├─ Eval Round        ├─ Eval Round       ├─ Eval  │
-│       │  (All Miners)      │  (All Miners)     │        │
-│       │                    │                   │        │
-│       ├─ Live Round        ├─ Live Round       ├─ Live  │
-│       │  (Winner)          │  (Winner)         │        │
-│       │                    │                   │        │
-│       ▼                    ▼                   ▼        │
+┌──────────────────────────────────────────────────────────┐
+│              Validator Main Loop (Async)                 │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  Job 1 (ETH/USDC)    Job 2 (WBTC/USDC)   Job 3 (AERO)    │
+│       │                    │                   │         │
+│       ├─ Eval Round        ├─ Eval Round       ├─ Eval   │
+│       │  (All Miners)      │  (All Miners)     │         │
+│       │                    │                   │         │
+│       ├─ Live Round        ├─ Live Round       ├─ Live   │
+│       │  (Winner)          │  (Winner)         │         │
+│       │                    │                   │         │
+│       ▼                    ▼                   ▼         │
 │   Concurrent               Concurrent          Concurrent│
-│   Every 15min              Every 15min         Every 15m│
-└─────────────────────────────────────────────────────────┘
+│   Every 15min              Every 15min         Every 15m │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ### Dual-Mode Operation
@@ -159,37 +159,37 @@ Miners can:
 │ Start Round (t=0)                                          │
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
-│ 1. Get current chainhead (latest block)                   │
-│ 2. Get current on-chain positions for the vault           │
+│ 1. Get current chainhead (latest block)                    │
+│ 2. Get current on-chain positions for the vault            │
 │                                                            │
-│ ┌────────────────────────────────────────────────────────┐│
-│ │ For Each Miner (Parallel):                            ││
-│ │                                                        ││
-│ │   ┌─────────────────────────────────────────┐        ││
-│ │   │ Forward Simulation (15min duration)     │        ││
-│ │   │                                          │        ││
-│ │   │  Starting from: chainhead state          │        ││
-│ │   │    │                                     │        ││
-│ │   │    ├─ Checkpoint (periodic intervals)   │        ││
-│ │   │    │   ├─ Query miner (RebalanceQuery)  │        ││
-│ │   │    │   ├─ Wait for response (60s max)   │        ││
-│ │   │    │   │                                 │        ││
-│ │   │    │   ├─ If refused: skip miner        │        ││
-│ │   │    │   ├─ If rebalance: update positions│        ││
-│ │   │    │   └─ Else: continue                 │        ││
-│ │   │    │                                     │        ││
-│ │   │    └─ Track performance metrics          │        ││
-│ │   │       (expected PnL, fees, IL, etc.)    │        ││
-│ │   │                                          │        ││
-│ │   └──────────────────────────────────────────┘        ││
-│ │                                                        ││
-│ └────────────────────────────────────────────────────────┘│
+│ ┌────────────────────────────────────────────────────────┐ │
+│ │ For Each Miner (Parallel):                             │ │
+│ │                                                        │ │
+│ │   ┌──────────────────────────────────────────┐         │ │
+│ │   │ Forward Simulation (15min duration)      │         │ │
+│ │   │                                          │         │ │
+│ │   │  Starting from: chainhead state          │         │ │
+│ │   │    │                                     │         │ │
+│ │   │    ├─ Checkpoint (periodic intervals)    │         │ │
+│ │   │    │   ├─ Query miner (RebalanceQuery)   │         │ │
+│ │   │    │   ├─ Wait for response (60s max)    │         │ │
+│ │   │    │   │                                 │         │ │
+│ │   │    │   ├─ If refused: skip miner         │         │ │
+│ │   │    │   ├─ If rebalance: update positions │         │ │
+│ │   │    │   └─ Else: continue                 │         │ │
+│ │   │    │                                     │         │ │
+│ │   │    └─ Track performance metrics          │         │ │
+│ │   │       (expected PnL, fees, IL, etc.)     │         │ │
+│ │   │                                          │         │ │
+│ │   └──────────────────────────────────────────┘         │ │ 
+│ │                                                        │ │
+│ └────────────────────────────────────────────────────────┘ │
 │                                                            │
-│ 4. Score all miners (rank by expected performance)        │
-│ 5. Select winner (best strategy)                          │
-│ 6. Update miner scores (EMA: 0.9×old + 0.1×new)          │
-│ 7. Update participation tracking                          │
-│ 8. Store results in database                              │
+│ 4. Score all miners (rank by expected performance)         │
+│ 5. Select winner (best strategy)                           │
+│ 6. Update miner scores (EMA: 0.9×old + 0.1×new)            │
+│ 7. Update participation tracking                           │
+│ 8. Store results in database                               │
 │                                                            │
 └────────────────────────────────────────────────────────────┘
 ```

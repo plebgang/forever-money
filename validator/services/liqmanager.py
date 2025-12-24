@@ -5,59 +5,37 @@ This module provides different methods for obtaining token inventory
 for LP strategy generation.
 """
 import asyncio
-import json
 import logging
-from pathlib import Path
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, List
 
-from web3 import Web3, AsyncWeb3
+from web3 import Web3
 from web3.contract import AsyncContract
 
 from protocol import Inventory, Position
+from validator.utils.web3 import AsyncWeb3Helper, ZERO_ADDRESS
 
 logger = logging.getLogger(__name__)
 
 
-class SnLiqManager:
+class SnLiqManagerService:
     """SnLiqManager"""
 
     def __init__(
         self,
+        chain_id: int,
         liquidity_manager_address: str,
         pool_address: str,
-        w3: AsyncWeb3,
     ):
         """Initialize the LiquidityManager inventory provider."""
-        # Initialize Web3
-        self.w3: AsyncWeb3 = w3
-        if not self.w3.is_connected():
-            raise ConnectionError(f"Failed to connect to RPC")
-
-        # Create contract instance
-        self.liq_manager: AsyncContract = self.w3.eth.contract(
-            address=Web3.to_checksum_address(liquidity_manager_address),
-            abi=self._load_abi("LiquidityManager"),
+        self.chain_id = chain_id
+        self.liq_manager: AsyncContract = AsyncWeb3Helper.make_web3(chain_id).make_contract_by_name(
+            name="LiquidityManager",
+            addr=liquidity_manager_address,
         )
-        self.pool: AsyncContract = self.w3.eth.contract(
-            address=Web3.to_checksum_address(pool_address),
-            abi=self._load_abi("ICLPool"),
+        self.pool: AsyncContract = AsyncWeb3Helper.make_web3(chain_id).make_contract_by_name(
+            name="ICLPool",
+            addr=pool_address,
         )
-
-        logger.info(
-            f"Initialized SnLiqManagerInventory with contract at {self.liq_manager.address}"
-        )
-
-    def _load_abi(self, abi_name: str) -> List[Dict]:
-        """Load the abi."""
-        abi_path = Path(__file__).parent.parent / "utils" / "abis" / f"{abi_name}.json"
-        if not abi_path.exists():
-            raise FileNotFoundError(f"ABI not found at {abi_path}")
-
-        with open(abi_path, "r") as f:
-            abi_data = json.load(f)
-            if isinstance(abi_data, dict):
-                return abi_data.get("abi", abi_data)
-            return abi_data
 
     async def _get_pool_tokens(self) -> Tuple[str, str]:
         """
@@ -79,7 +57,9 @@ class SnLiqManager:
             return token0, token1
 
         except Exception as e:
-            raise ValueError(f"Failed to extract tokens from pool {self.pool.address}: {e}")
+            raise ValueError(
+                f"Failed to extract tokens from pool {self.pool.address}: {e}"
+            )
 
     async def _find_registered_ak(self, token_address: str) -> Optional[str]:
         """
@@ -98,7 +78,7 @@ class SnLiqManager:
             ).call()
 
             # If it returns a non-zero address, the token is registered
-            if pool_manager != "0x0000000000000000000000000000000000000000":
+            if pool_manager != ZERO_ADDRESS:
                 logger.info(
                     f"Token {token_address} is registered with PoolManager {pool_manager}"
                 )
@@ -201,8 +181,8 @@ class SnLiqManager:
 
     async def get_current_price(self) -> int:
         """Get the current price of the pool."""
-        (sqrt_price_x96,) = await self.pool.functions.slot0()
-        return sqrt_price_x96
+        slot0 = await self.pool.functions.slot0().call()
+        return slot0[0]
 
     async def get_current_positions(self) -> List[Position]:
         # 1. Create pool contract to get tokens
@@ -214,22 +194,22 @@ class SnLiqManager:
         # 3. Determine which token is the AK token (has position manager)
         position_manager_address_0, position_manager_address_1 = await asyncio.gather(
             self.liq_manager.functions.akAddressToPositionManager(
-                self.w3.to_checksum_address(token0)
+                Web3.to_checksum_address(token0)
             ).call(),
             self.liq_manager.functions.akAddressToPositionManager(
-                self.w3.to_checksum_address(token1)
+                Web3.to_checksum_address(token1)
             ).call(),
         )
         if (
-            position_manager_address_0 != "0x0000000000000000000000000000000000000000"
+            position_manager_address_0 != ZERO_ADDRESS
             and position_manager_address_1
-            != "0x0000000000000000000000000000000000000000"
+            != ZERO_ADDRESS
         ):
             raise ValueError("Invalid vault")
-        if position_manager_address_0 != "0x0000000000000000000000000000000000000000":
+        if position_manager_address_0 != ZERO_ADDRESS:
             position_manager_address = position_manager_address_0
             logger.debug(f"Token0 ({token0}) is the AK token")
-        elif position_manager_address_1 != "0x0000000000000000000000000000000000000000":
+        elif position_manager_address_1 != ZERO_ADDRESS:
             position_manager_address = position_manager_address_1
             logger.debug(f"Token1 ({token1}) is the AK token")
         else:
@@ -240,14 +220,17 @@ class SnLiqManager:
         logger.debug(f"Position manager: {position_manager_address}")
 
         # 4. Get token IDs from position manager
-        pos_manager_abi = self._load_abi("AeroCLPositionManager")
-        pos_manager_contract = self.w3.eth.contract(
-            address=self.w3.to_checksum_address(position_manager_address),
-            abi=pos_manager_abi,
+        pos_manager_contract = AsyncWeb3Helper.make_web3(chain_id=self.chain_id).make_contract_by_name(
+            name="AeroCLPositionManager",
+            addr=position_manager_address,
         )
-        token_ids = await pos_manager_contract.functions.tokenIds().call()
-        logger.debug(f"Found {len(token_ids)} token IDs: {token_ids}")
+        try:
+            token_ids = await pos_manager_contract.functions.tokenIds().call()
+        except Exception as e:
+            logger.warning(f"No token ids found: {e}")
+            return []
 
+        logger.debug(f"Found {len(token_ids)} token IDs: {token_ids}")
         if not token_ids:
             return []
 
@@ -256,10 +239,9 @@ class SnLiqManager:
         logger.debug(f"NFT manager: {nft_manager_address}")
 
         # 6. Get position details for each token ID
-        nft_manager_abi = self._load_abi("INonfungiblePositionManager")
-        nft_manager_contract = self.w3.eth.contract(
-            address=self.w3.to_checksum_address(nft_manager_address),
-            abi=nft_manager_abi,
+        nft_manager_contract = AsyncWeb3Helper.make_web3(chain_id=self.chain_id).make_contract_by_name(
+            name="INonfungiblePositionManager",
+            addr=nft_manager_address,
         )
 
         positions = []

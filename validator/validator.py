@@ -12,16 +12,26 @@ Supports:
 import argparse
 import asyncio
 import logging
-import os
 import sys
 
 import bittensor as bt
-from dotenv import load_dotenv
 from web3 import AsyncHTTPProvider, AsyncWeb3
 
-from validator.job_manager_async import AsyncJobManager
-from validator.models_orm import init_db, close_db
-from validator.round_orchestrator_async import AsyncRoundOrchestrator
+from validator.repositories.job import JobRepository
+from validator.models.job import init_db, close_db
+from validator.round_orchestrator import AsyncRoundOrchestrator
+from validator.utils.env import (
+    NETUID,
+    SUBTENSOR_NETWORK,
+    EXECUTOR_BOT_URL,
+    EXECUTOR_BOT_API_KEY,
+    REBALANCE_CHECK_INTERVAL,
+    JOBS_POSTGRES_HOST,
+    JOBS_POSTGRES_PORT,
+    JOBS_POSTGRES_DB,
+    JOBS_POSTGRES_USER,
+    JOBS_POSTGRES_PASSWORD,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -34,40 +44,45 @@ logger = logging.getLogger(__name__)
 
 def get_config():
     """Load configuration from environment and arguments."""
-    load_dotenv()
-
     parser = argparse.ArgumentParser(description="SN98 ForeverMoney Validator")
 
-    # Only essential arguments (wallet credentials)
+    # Wallet arguments
     parser.add_argument("--wallet.name", type=str, required=True, help="Wallet name")
     parser.add_argument(
         "--wallet.hotkey", type=str, required=True, help="Wallet hotkey"
     )
 
+    # Network arguments
+    parser.add_argument(
+        "--subtensor.network",
+        type=str,
+        default=None,
+        help=f"Subtensor network endpoint (e.g., ws://127.0.0.1:9944, wss://entrypoint-finney.opentensor.ai:443, or finney/test/local). Default: {SUBTENSOR_NETWORK}",
+    )
+    parser.add_argument(
+        "--netuid",
+        type=int,
+        default=None,
+        help=f"Network UID. Default: {NETUID}",
+    )
+
     args = parser.parse_args()
 
-    # All other config from environment
+    # All other config from environment, with CLI overrides
     config = {
-        "netuid": int(os.getenv("NETUID", 98)),
-        "subtensor_network": os.getenv("SUBTENSOR_NETWORK", "finney"),
+        "netuid": args.netuid if args.netuid is not None else NETUID,
+        "subtensor_network": getattr(args, "subtensor.network") or SUBTENSOR_NETWORK,
         "wallet_name": getattr(args, "wallet.name"),
         "wallet_hotkey": getattr(args, "wallet.hotkey"),
-        "chain_id": int(os.getenv("CHAIN_ID", 8453)),
-        "executor_bot_url": os.getenv("EXECUTOR_BOT_URL"),
-        "executor_bot_api_key": os.getenv("EXECUTOR_BOT_API_KEY"),
-        "rebalance_check_interval": int(os.getenv("REBALANCE_CHECK_INTERVAL", 100)),
+        "executor_bot_url": EXECUTOR_BOT_URL,
+        "executor_bot_api_key": EXECUTOR_BOT_API_KEY,
+        "rebalance_check_interval": REBALANCE_CHECK_INTERVAL,
     }
 
     # Build Tortoise DB URL from environment
-    db_host = os.getenv("JOBS_POSTGRES_HOST", "localhost")
-    db_port = int(os.getenv("JOBS_POSTGRES_PORT", 5432))
-    db_name = os.getenv("JOBS_POSTGRES_DB", "sn98_jobs")
-    db_user = os.getenv("JOBS_POSTGRES_USER", "sn98_user")
-    db_pass = os.getenv("JOBS_POSTGRES_PASSWORD", "")
-
     config[
         "tortoise_db_url"
-    ] = f"postgres://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+    ] = f"postgres://{JOBS_POSTGRES_USER}:{JOBS_POSTGRES_PASSWORD}@{JOBS_POSTGRES_HOST}:{JOBS_POSTGRES_PORT}/{JOBS_POSTGRES_DB}"
 
     return config
 
@@ -87,7 +102,7 @@ async def run_jobs_validator(config):
 
     # Initialize Bittensor components
     wallet = bt.Wallet(name=config["wallet_name"], hotkey=config["wallet_hotkey"])
-    subtensor = bt.subtensor(network=config["subtensor_network"])
+    subtensor = bt.Subtensor(network=config["subtensor_network"])
     metagraph = subtensor.metagraph(netuid=config["netuid"])
     dendrite = bt.Dendrite(wallet=wallet)
 
@@ -101,21 +116,16 @@ async def run_jobs_validator(config):
     await init_db(config["tortoise_db_url"])
     logger.info("Database connected")
 
-    # Initialize Web3 for block fetching
-    rpc_url = os.getenv("RPC_URL", "https://mainnet.base.org")
-    w3 = AsyncWeb3(AsyncHTTPProvider(rpc_url))
-
     # Initialize async job manager
-    job_manager = AsyncJobManager()
+    job_repository = JobRepository()
     logger.info("Async job manager initialized")
 
     # Initialize async round orchestrator
     orchestrator = AsyncRoundOrchestrator(
-        job_manager=job_manager,
+        job_repository=job_repository,
         dendrite=dendrite,
         metagraph=metagraph,
         config=config,
-        w3=w3,
     )
     logger.info("Async round orchestrator initialized")
 
@@ -133,7 +143,7 @@ async def run_jobs_validator(config):
         while True:
             try:
                 # Get all active jobs from database
-                active_jobs = await job_manager.get_active_jobs()
+                active_jobs = await job_repository.get_active_jobs()
 
                 if not active_jobs:
                     logger.warning(
