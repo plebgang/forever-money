@@ -23,7 +23,7 @@ class UniswapV3Math:
 
         ratio = (
             0xFFFCB933BD6FAD37AA2D162D1A594001
-            if abs_tick & 0x1 == 0
+            if abs_tick & 0x1 != 0
             else 0x100000000000000000000000000000000
         )
 
