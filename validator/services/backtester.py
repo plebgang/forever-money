@@ -110,6 +110,21 @@ class BacktesterService:
             - in_range_ratio: Fraction of time price was in range
         """
 
+        # Handle empty rebalance history (miner returned no positions)
+        if not rebalance_history:
+            return {
+                "fees_collected": 0,
+                "impermanent_loss": 0.0,
+                "fees0": 0,
+                "fees1": 0,
+                "in_range_ratio": 0.0,
+                "amount0_deployed": 0,
+                "amount1_deployed": 0,
+                "amount0_holdings": int(initial_inventory.amount0),
+                "amount1_holdings": int(initial_inventory.amount1),
+                "final_sqrt_price_x96": 0,  # Will be updated below if needed
+            }
+
         rebalance_history.sort(key=lambda x: x["block"], reverse=True)
 
         def get_deployed_positions(current_block: int) -> List[Position]:
@@ -205,7 +220,7 @@ class BacktesterService:
             amount0_deployed += int(amount0)
             amount1_deployed += int(amount1)
 
-        final_inventory: Inventory = rebalance_history[0]["current_inventory"]
+        final_inventory = rebalance_history[0]["inventory"]
 
         # HODL value (token1 units, int-only)
         # IMPORTANT: HODL uses INITIAL inventory, valued at FINAL price

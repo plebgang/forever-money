@@ -282,7 +282,10 @@ async def init_db(db_url: Optional[str] = None):
         db_url: Optional database URL (postgresql+asyncpg://user:pass@host:port/db)
     """
     if db_url:
-        await Tortoise.init(db_url=db_url, modules={"models": ["validator.models.job"]})
+        await Tortoise.init(
+            db_url=db_url,
+            modules={"models": ["validator.models.job", "validator.models.pool_events"]}
+        )
     else:
         await Tortoise.init(config=TORTOISE_ORM)
 

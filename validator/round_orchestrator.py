@@ -197,11 +197,15 @@ class AsyncRoundOrchestrator:
         else:
             logger.warning(f"No winner for evaluation round {round_number}")
 
-        # Complete round
+        # Complete round - only save serializable score data
+        serializable_scores = {
+            str(k): {"hotkey": v["hotkey"], "score": float(v["score"])}
+            for k, v in scores.items()
+        }
         await self.job_repository.complete_round(
             round_id=round_obj.round_id,
             winner_uid=winner["miner_uid"] if winner else None,
-            performance_data={"scores": {str(k): v for k, v in scores.items()}},
+            performance_data={"scores": serializable_scores},
         )
 
         logger.info(f"Completed evaluation round {round_number}")
@@ -273,14 +277,15 @@ class AsyncRoundOrchestrator:
                     "result": result,
                 }
 
-                # Save rebalance decisions
+                # Save rebalance decisions (serialize for JSON storage)
+                serializable_history = self._serialize_rebalance_history(result["rebalance_history"])
                 await self.job_repository.save_rebalance_decision(
                     round_id=round_.round_id,
                     job_id=job.job_id,
                     miner_uid=uid,
                     miner_hotkey=self.metagraph.hotkeys[uid],
                     accepted=True,
-                    rebalance_data=result["rebalance_history"],
+                    rebalance_data=serializable_history,
                     refusal_reason=None,
                     response_time_ms=result.get("total_query_time_ms", 0),
                 )
@@ -471,15 +476,21 @@ class AsyncRoundOrchestrator:
             f"{len(rebalance_history)} rebalances, "
             f"PnL: {performance_metrics.get('pnl', 0):.4f}"
         )
-        miner_score = await Scorer.score_pol_strategy(job, performance_metrics)
+        # Build initial_inventory dict for scorer
+        initial_inventory_dict = {
+            "initial_amount0": int(initial_inventory.amount0),
+            "initial_amount1": int(initial_inventory.amount1),
+            "initial_sqrt_price_x96": performance_metrics.get("final_sqrt_price_x96", 0),
+        }
+        round_score = await Scorer.score_pol_strategy(performance_metrics, initial_inventory_dict)
         # calculate the miner score, based on the score their strategy
         # got for this round
-        miner_score = await self.job_repository.update_miner_score(
+        await self.job_repository.update_miner_score(
             job_id=job.job_id,
             miner_uid=miner_uid,
             miner_hotkey=self.metagraph.hotkeys[miner_uid],
             # score here is the score for this particular round
-            evaluation_score=miner_score,
+            evaluation_score=round_score,
             round_type=RoundType.EVALUATION,
         )
         await self.job_repository.update_miner_participation(
@@ -492,7 +503,7 @@ class AsyncRoundOrchestrator:
             "rebalance_history": rebalance_history,
             "final_positions": current_positions,
             "performance_metrics": performance_metrics,
-            "score": miner_score,
+            "score": round_score,
             "total_query_time_ms": total_query_time_ms,
         }
 
@@ -545,23 +556,33 @@ class AsyncRoundOrchestrator:
             rebalances_so_far=rebalances_so_far,
         )
 
+        miner_axon = self.metagraph.axons[miner_uid]
+        logger.info(f"[QUERY] >>> Sending to miner {miner_uid} @ {miner_axon.ip}:{miner_axon.port}")
+        logger.info(f"[QUERY]     Job: {job_id}, Block: {block_number}, Price: {current_price:.6f}")
+
         try:
+            import time as time_module
+            query_start = time_module.time()
             responses = await self.dendrite(
-                axons=[self.metagraph.axons[miner_uid]],
+                axons=[miner_axon],
                 synapse=synapse,
                 timeout=5,  # 5 second timeout per query
                 deserialize=True,
             )
+            query_elapsed = (time_module.time() - query_start) * 1000
 
             response = responses[0] if responses else None
 
             if response and hasattr(response, "accepted"):
+                logger.info(f"[QUERY] <<< Response from miner {miner_uid} in {query_elapsed:.0f}ms")
+                logger.info(f"[QUERY]     Accepted: {response.accepted}, Positions: {len(response.desired_positions) if response.desired_positions else 0}")
                 return response
 
+            logger.warning(f"[QUERY] !!! No valid response from miner {miner_uid} after {query_elapsed:.0f}ms")
             return None
 
         except Exception as e:
-            logger.error(f"Error querying miner {miner_uid}: {e}")
+            logger.error(f"[QUERY] !!! Error querying miner {miner_uid}: {e}")
             return None
 
     async def _execute_strategy_onchain(
@@ -643,6 +664,34 @@ class AsyncRoundOrchestrator:
             "hotkey": winner_data["hotkey"],
             "score": winner_data["score"],
         }
+
+    def _serialize_rebalance_history(self, history: List[Dict]) -> List[Dict]:
+        """Serialize rebalance history for JSON storage."""
+        serialized = []
+        for entry in history:
+            serialized_entry = {
+                "block": entry.get("block"),
+                "price": entry.get("price"),
+                "price_in_query": entry.get("price_in_query"),
+            }
+            # Serialize positions
+            old_pos = entry.get("old_positions") or []
+            new_pos = entry.get("new_positions") or []
+            serialized_entry["old_positions"] = [
+                p.__dict__ if hasattr(p, '__dict__') else p for p in old_pos
+            ]
+            serialized_entry["new_positions"] = [
+                p.__dict__ if hasattr(p, '__dict__') else p for p in new_pos
+            ]
+            # Serialize inventory
+            inv = entry.get("inventory")
+            if inv:
+                serialized_entry["inventory"] = {
+                    "amount0": str(inv.amount0) if hasattr(inv, 'amount0') else str(inv.get("amount0", 0)),
+                    "amount1": str(inv.amount1) if hasattr(inv, 'amount1') else str(inv.get("amount1", 0)),
+                }
+            serialized.append(serialized_entry)
+        return serialized
 
     async def _get_latest_block(self, chain_id: int) -> int:
         """Get latest block from chain."""
