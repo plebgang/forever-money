@@ -59,7 +59,7 @@ async def test_backtester_no_price_change():
     
     mock_db = MockDataSource(
         swap_events=[swap_event],
-        prices={100: initial_price, 200: initial_price}
+        prices={0: initial_price, 100: initial_price, 200: initial_price}
     )
     
     backtester = BacktesterService(data_source=mock_db)
@@ -76,7 +76,7 @@ async def test_backtester_no_price_change():
     rebalance_history = [{
         "block": 0,
         "new_positions": [pos],
-        "current_inventory": Inventory(amount0="0", amount1="0")
+        "inventory": Inventory(amount0="0", amount1="0")
     }]
     
     initial_inventory = Inventory(amount0="100000", amount1="100000")
@@ -142,7 +142,7 @@ async def test_backtester_price_goes_up():
     rebalance_history = [{
         "block": 0,
         "new_positions": [pos],
-        "current_inventory": Inventory(amount0="0", amount1="0")
+        "inventory": Inventory(amount0="0", amount1="0")
     }]
     
     initial_inventory = Inventory(amount0="100000", amount1="100000")
