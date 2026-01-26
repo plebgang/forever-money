@@ -187,8 +187,8 @@ class AsyncRoundOrchestrator:
             inventory=inventory,
         )
 
-        # Select winner
-        winner = self._select_winner(scores)
+        # Select winner (tie-break by historic combined_score)
+        winner = await self._select_winner(job.job_id, scores)
         if winner:
             logger.info(
                 f"Evaluation round {round_number} winner: Miner {winner['miner_uid']} "
@@ -201,8 +201,22 @@ class AsyncRoundOrchestrator:
         await self.job_repository.complete_round(
             round_id=round_obj.round_id,
             winner_uid=winner["miner_uid"] if winner else None,
-            performance_data={"scores": {str(k): v for k, v in scores.items()}},
+            performance_data={"scores": {str(k): v["score"] for k, v in scores.items()}},
         )
+
+        # Update MinerScore (eval EMA) and participation for all participants
+        # after winner selection so tie-breaking uses pre-update combined_score
+        for uid, data in scores.items():
+            await self.job_repository.update_miner_score(
+                job_id=job.job_id,
+                miner_uid=uid,
+                miner_hotkey=data["hotkey"],
+                evaluation_score=data["score"],
+                round_type=RoundType.EVALUATION,
+            )
+            await self.job_repository.update_miner_participation(
+                job_id=job.job_id, miner_uid=uid, participated=True
+            )
 
         logger.info(f"Completed evaluation round {round_number}")
 
@@ -1132,19 +1146,26 @@ class AsyncRoundOrchestrator:
                 "error": error_msg
             }
 
-    def _select_winner(self, scores: Dict[int, Dict]) -> Optional[Dict]:
-        """Select winner from scores."""
+    async def _select_winner(
+        self, job_id: str, scores: Dict[int, Dict]
+    ) -> Optional[Dict]:
+        """
+        Select one winner per job from round scores.
+        Tie-breaking: historic combined_score (eval + live) descending.
+        """
         if not scores:
             return None
 
-        sorted_scores = sorted(
-            [(uid, data) for uid, data in scores.items()],
-            key=lambda x: x[1]["score"],
-            reverse=True,
+        round_scores = {uid: data["score"] for uid, data in scores.items()}
+        historic = await self.job_repository.get_historic_combined_scores(
+            job_id, list(scores.keys())
         )
+        ranked = Scorer.rank_miners_by_score_and_history(round_scores, historic)
+        if not ranked:
+            return None
 
-        winner_uid, winner_data = sorted_scores[0]
-
+        winner_uid, round_score = ranked[0]
+        winner_data = scores[winner_uid]
         return {
             "miner_uid": winner_uid,
             "hotkey": winner_data["hotkey"],

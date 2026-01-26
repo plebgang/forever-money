@@ -323,7 +323,8 @@ class JobRepository:
             min_score: Minimum combined score threshold
 
         Returns:
-            List of eligible MinerScore objects, sorted by score descending
+            List of eligible MinerScore objects, sorted by score descending.
+            Tie-break: total_evaluations desc, then total_live_rounds desc.
         """
         job = await Job.get(job_id=job_id)
 
@@ -331,9 +332,32 @@ class JobRepository:
             job=job,
             is_eligible_for_live=True,
             combined_score__gte=Decimal(str(min_score)),
-        ).order_by("-combined_score")
+        ).order_by("-combined_score", "-total_evaluations", "-total_live_rounds")
 
         return scores
+
+    async def get_historic_combined_scores(
+        self, job_id: str, miner_uids: List[int]
+    ) -> Dict[int, float]:
+        """
+        Get combined_score for miners **before** any updates this round.
+        Used for tie-breaking when selecting evaluation round winner.
+
+        Args:
+            job_id: Job identifier
+            miner_uids: UIDs to look up
+
+        Returns:
+            Dict mapping miner_uid -> combined_score (0.0 if no MinerScore)
+        """
+        if not miner_uids:
+            return {}
+        job = await Job.get(job_id=job_id)
+        rows = await MinerScore.filter(
+            job=job,
+            miner_uid__in=miner_uids,
+        ).values_list("miner_uid", "combined_score")
+        return {uid: float(cs) for uid, cs in rows}
 
     async def complete_round(
         self, round_id: str, winner_uid: Optional[int], performance_data: Optional[Dict]
@@ -382,20 +406,22 @@ class JobRepository:
 
     async def get_top_miners_by_job(self) -> Dict[str, int]:
         """
-        Get the top miner UID for each active job based on combined score.
-        
+        Get the top miner UID for each active job (one winner per job).
+        Uses combined_score; ties broken by total_evaluations, then total_live_rounds.
+
         Returns:
             Dict mapping job_id -> miner_uid
         """
         jobs = await Job.filter(is_active=True)
         winners = {}
-        
         for job in jobs:
-            # Get top score
-            top_score = await MinerScore.filter(job=job).order_by("-combined_score").first()
-            if top_score:
-                winners[job.job_id] = top_score.miner_uid
-                
+            top = await MinerScore.filter(job=job).order_by(
+                "-combined_score",
+                "-total_evaluations",
+                "-total_live_rounds",
+            ).first()
+            if top:
+                winners[job.job_id] = top.miner_uid
         return winners
 
     async def create_live_execution(
