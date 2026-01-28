@@ -155,15 +155,15 @@ class SnLiqManagerService:
                 ak_address = registered_token1
                 logger.info(f"Using token1 ({token1}) as registered AK")
 
-        # Step 3: Exit if neither token is registered
+        # Step 3: Raise exception if neither token is registered (don't exit - let caller handle)
         if ak_address is None:
             error_msg = (
                 f"Neither token0 ({token0}) nor token1 ({token1}) is registered "
                 f"in LiquidityManager at {self.liq_manager.address}. "
-                f"Cannot determine inventory. Exiting."
+                f"Cannot determine inventory."
             )
             logger.error(error_msg)
-            raise SystemExit(error_msg)
+            raise ValueError(error_msg)
 
         # Step 4: Query stashed tokens for both token0 and token1
         amount0, amount1 = await asyncio.gather(
